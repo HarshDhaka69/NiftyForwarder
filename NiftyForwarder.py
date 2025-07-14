@@ -44,7 +44,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('nifty_forwarder.log'),
+        logging.FileHandler('NiftyForwarder.log'),
         logging.StreamHandler(sys.stdout)
     ]
 )
@@ -53,7 +53,7 @@ logger = logging.getLogger(__name__)
 class NiftyForwarder:
     def __init__(self):
         self.client = None
-        self.session_file = 'nifty_forwarder_session'
+        self.session_file = 'NiftyForwarder_session'
         self.target_channels = config.TARGET_CHANNELS
         self.source_channels = config.SOURCE_CHANNELS
         self.api_id = config.API_ID

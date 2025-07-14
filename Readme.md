@@ -38,7 +38,7 @@ pkg install build-essential libffi openssl -y
 ### Step 2: Clone the Repository
 ```bash
 # Clone NiftyForwarder repository
-git clone https://github.com/ItsHarshX/NiftyForwarder.git
+git clone https://github.com/HarshDhaka69/NiftyForwarder.git
 
 # Navigate to the project directory
 cd NiftyForwarder
