@@ -1,4 +1,22 @@
-telethon>=1.34.0
-asyncio==3.4.3
-logging==0.4.9.6
-datetime==5.5
+# NiftyForwarder - Telegram Message Forwarder Requirements
+# Author: @ItsHarshX
+# Description: Required packages for NiftyForwarder with keyword filtering
+
+# Core Telegram API library
+telethon>=1.24.0
+
+# Additional dependencies (usually included with Python but listed for completeness)
+asyncio>=3.4.3
+logging>=0.4.9.6
+json5>=0.9.6
+re>=2.2.1
+
+# Optional: For enhanced performance and features
+cryptg>=0.2.post4
+hachoir>=3.1.2
+pillow>=8.3.2
+aiofiles>=0.7.0
+
+# Development and testing (optional)
+pytest>=6.2.4
+pytest-asyncio>=0.15.1
