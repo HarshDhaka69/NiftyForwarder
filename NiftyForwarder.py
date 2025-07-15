@@ -258,8 +258,10 @@ class NiftyForwarder:
                     self.settings_manager.save_settings()
                     
                     # Remove session file
-                    if os.path.exists(f"{self.session_file}.session"):
-                        os.remove(f"{self.session_file}.session")
+                    session_files = [f"{self.session_file}.session", f"{self.session_file}.session-journal"]
+                    for file_path in session_files:
+                        if os.path.exists(file_path):
+                            os.remove(file_path)
                     
                     print("✅ All settings have been reset!")
                     print("🔄 Please restart the application to reconfigure.")
@@ -433,7 +435,7 @@ class NiftyForwarder:
         """Initialize Telegram client and handle authentication"""
         try:
             self.client = TelegramClient(self.session_file, self.api_id, self.api_hash)
-            await self.client.start()
+            await self.client.start(phone=self.phone)
             
             # Check if user is authorized
             if not await self.client.is_user_authorized():
@@ -453,15 +455,31 @@ class NiftyForwarder:
     async def authenticate(self):
         """Handle user authentication"""
         try:
+            # Request verification code
             await self.client.send_code_request(self.phone)
-            code = input("Enter the verification code: ")
             
-            try:
-                await self.client.sign_in(self.phone, code)
-            except SessionPasswordNeededError:
-                password = input("Enter your 2FA password: ")
-                await self.client.sign_in(password=password)
-                
+            while True:
+                try:
+                    code = input("Enter the verification code: ").strip()
+                    if not code:
+                        print("❌ Code cannot be empty!")
+                        continue
+                    
+                    await self.client.sign_in(self.phone, code)
+                    break
+                    
+                except SessionPasswordNeededError:
+                    password = input("Enter your 2FA password: ").strip()
+                    if password:
+                        await self.client.sign_in(password=password)
+                        break
+                    else:
+                        print("❌ Password cannot be empty!")
+                        
+                except Exception as e:
+                    self.logger.error(f"Authentication error: {e}")
+                    print("❌ Invalid code or authentication failed. Please try again.")
+                    
             self.logger.info("Authentication successful!")
             
         except Exception as e:
@@ -472,7 +490,7 @@ class NiftyForwarder:
         """Get entity information from channel/group link"""
         try:
             # Handle private invite links
-            if '+' in entity_link and 't.me' in entity_link:
+            if 'joinchat' in entity_link or '+' in entity_link:
                 entity = await self.client.get_entity(entity_link)
                 return entity
             
@@ -569,16 +587,21 @@ class NiftyForwarder:
             if not self.should_forward_message(event):
                 return
                 
-            # Get sender info
-            sender = await event.get_sender()
-            chat = await event.get_chat()
-            
-            # Log message details
-            sender_name = getattr(sender, 'first_name', '') or getattr(sender, 'title', 'Unknown')
-            chat_name = getattr(chat, 'title', '') or getattr(chat, 'first_name', 'Unknown')
-            
-            self.logger.info(f"📨 Keyword match! Forwarding message from {sender_name} in {chat_name}")
-            self.logger.info(f"📝 Message preview: {message_text[:100]}...")
+            # Get sender info safely
+            try:
+                sender = await event.get_sender()
+                chat = await event.get_chat()
+                
+                # Log message details
+                sender_name = getattr(sender, 'first_name', '') or getattr(sender, 'title', 'Unknown')
+                chat_name = getattr(chat, 'title', '') or getattr(chat, 'first_name', 'Unknown')
+                
+                self.logger.info(f"📨 Keyword match! Forwarding message from {sender_name} in {chat_name}")
+                self.logger.info(f"📝 Message preview: {message_text[:100]}...")
+            except Exception as e:
+                self.logger.warning(f"Could not get sender/chat info: {e}")
+                self.logger.info(f"📨 Forwarding message with keyword match")
+                self.logger.info(f"📝 Message preview: {message_text[:100]}...")
             
             # Forward to all target channels
             forwarded_count = 0
@@ -636,10 +659,10 @@ class NiftyForwarder:
             return False
             
         # Check bots filter
-        if DEFAULT_CONFIG['IGNORE_BOTS'] and message.from_id and hasattr(message.from_id, 'user_id'):
+        if DEFAULT_CONFIG['IGNORE_BOTS'] and message.from_id:
             try:
-                sender = event.sender
-                if sender and getattr(sender, 'bot', False):
+                # For newer Telethon versions, check if sender is a bot
+                if hasattr(event, 'sender') and event.sender and getattr(event.sender, 'bot', False):
                     self.logger.debug("⏭️ Skipping bot message")
                     return False
             except:
@@ -723,13 +746,14 @@ def main():
     
     for attempt in range(max_retries):
         try:
-            logger.info(f"🔄 Starting attempt {attempt + 1}/{max_retries}")
+            logger.info(f"🚀 Starting NiftyForwarder (Attempt {attempt + 1}/{max_retries})")
             
-            # Create and start forwarder
+            # Create and start the forwarder
             forwarder = NiftyForwarder()
             forwarder.start()
             
             # If we reach here, the forwarder ran successfully
+            logger.info("✅ NiftyForwarder completed successfully!")
             break
             
         except KeyboardInterrupt:
@@ -737,7 +761,7 @@ def main():
             break
             
         except Exception as e:
-            logger.error(f"❌ Attempt {attempt + 1} failed: {e}")
+            logger.error(f"❌ NiftyForwarder failed on attempt {attempt + 1}: {e}")
             
             if attempt < max_retries - 1:
                 logger.info(f"⏳ Retrying in {retry_delay} seconds...")
@@ -745,7 +769,7 @@ def main():
             else:
                 logger.error("❌ All retry attempts failed!")
                 logger.error("📞 Contact @ItsHarshX for assistance!")
-                sys.exit(1)
-
+                raise
+                
 if __name__ == "__main__":
     main()
