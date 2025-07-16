@@ -38,7 +38,7 @@ DEFAULT_CONFIG = {
     'LOG_LEVEL': 'INFO',
     'LOG_TO_FILE': True,
     'LOG_FILE_NAME': 'nifty_forwarder.log',
-    'FORWARD_DELAY': 2,
+    'FORWARD_DELAY': 0.5,
     'IGNORE_MEDIA': False,
     'IGNORE_FORWARDS': False,
     'IGNORE_BOTS': False,
@@ -254,6 +254,11 @@ class NiftyForwarder:
         # ADD THIS LINE:
         self.message_mapping = {}  # Maps original_msg_id -> [forwarded_msg_id1, forwarded_msg_id2, ...]
         self.message_mapping_file = 'nifty_message_mapping.json'
+        
+        # ADD THESE LINES for premium emoji handling:
+        self.original_messages = {}  # Store original message content for comparison
+        self.edit_cooldown = {}  # Track last edit time to prevent rapid edits
+        self.edit_cooldown_seconds = 2  # Minimum seconds between edits
         
         # Initialize settings
         self.api_id = None
@@ -946,11 +951,12 @@ class NiftyForwarder:
         async def handle_new_message(event):
             await self.forward_message(event, target_entities)
             
-        # ADD THESE TWO NEW HANDLERS:
+        # Register event handler for edited messages with premium emoji fix
         @self.client.on(events.MessageEdited(chats=source_entities))
         async def handle_edited_message(event):
             await self.handle_message_edit(event, target_entities)
 
+        # Register event handler for deleted messages
         @self.client.on(events.MessageDeleted)
         async def handle_deleted_message(event):
             await self.handle_message_deletion(event, target_entities)
@@ -996,6 +1002,13 @@ class NiftyForwarder:
             if event.message.id in self.message_mapping:
                 self.logger.debug(f"⏭️ Message already forwarded, skipping duplicate: {event.message.id}")
                 return
+                
+            # Store original message content for edit comparison
+            self.original_messages[event.message.id] = {
+                'text': message_text,
+                'media': event.message.media,
+                'timestamp': time.time()
+            }
                 
             # Get sender info safely
             try:
@@ -1067,15 +1080,52 @@ class NiftyForwarder:
             self.logger.error(f"❌ Error in forward_message: {e}")
             
     async def handle_message_edit(self, event, target_entities):
-        """Handle edited messages and update forwarded messages"""
+        """Handle edited messages and update forwarded messages with premium emoji fix"""
         try:
             # Get message text
             message_text = event.message.text or ""
             
+            # Check if we have the original message stored
+            if event.message.id not in self.original_messages:
+                self.logger.debug(f"⏭️ No original message found for edit: {event.message.id}")
+                return
+                
+            # Get original message content
+            original_content = self.original_messages[event.message.id]
+            
+            # Check for premium emoji cooldown to prevent rapid edits
+            current_time = time.time()
+            if event.message.id in self.edit_cooldown:
+                time_since_last_edit = current_time - self.edit_cooldown[event.message.id]
+                if time_since_last_edit < self.edit_cooldown_seconds:
+                    self.logger.debug(f"⏭️ Edit cooldown active for message {event.message.id}: {time_since_last_edit:.1f}s < {self.edit_cooldown_seconds}s")
+                    return
+            
+            # Compare actual content to detect real edits vs premium emoji updates
+            content_changed = False
+            
+            # Check if text content actually changed
+            if original_content['text'] != message_text:
+                content_changed = True
+                self.logger.info(f"✏️ Text content changed for message {event.message.id}")
+            
+            # Check if media changed
+            if original_content['media'] != event.message.media:
+                content_changed = True
+                self.logger.info(f"✏️ Media content changed for message {event.message.id}")
+            
+            # If no actual content change, this is likely a premium emoji update
+            if not content_changed:
+                self.logger.debug(f"⏭️ No actual content change detected for message {event.message.id} - likely premium emoji update")
+                return
+            
+            # Update edit cooldown
+            self.edit_cooldown[event.message.id] = current_time
+            
             # Check if message still contains keywords after edit
             if not self.check_keyword_match(message_text):
                 self.logger.info(f"🔄 Edited message no longer contains keywords, considering deletion...")
-                # Optionally delete the forwarded messages since they no longer match
+                # Delete the forwarded messages since they no longer match
                 await self.handle_message_deletion_by_id(event.message.id, target_entities)
                 return
             
@@ -1086,7 +1136,7 @@ class NiftyForwarder:
             
             forwarded_ids = self.message_mapping[event.message.id]
             
-            self.logger.info(f"✏️ Handling message edit for {len(forwarded_ids)} forwarded messages")
+            self.logger.info(f"✏️ Handling real message edit for {len(forwarded_ids)} forwarded messages")
             
             # Edit all forwarded messages
             for i, target_entity in enumerate(target_entities):
@@ -1107,6 +1157,13 @@ class NiftyForwarder:
                         
                     except Exception as e:
                         self.logger.error(f"❌ Failed to edit message in {target_entity}: {e}")
+            
+            # Update stored original message content
+            self.original_messages[event.message.id] = {
+                'text': message_text,
+                'media': event.message.media,
+                'timestamp': current_time
+            }
             
         except Exception as e:
             self.logger.error(f"❌ Error in handle_message_edit: {e}")
@@ -1151,8 +1208,12 @@ class NiftyForwarder:
                     except Exception as e:
                         self.logger.error(f"❌ Failed to delete message from {target_entity}: {e}")
             
-            # Remove from mapping since messages are deleted
+            # Remove from mapping and original messages since messages are deleted
             del self.message_mapping[original_msg_id]
+            if original_msg_id in self.original_messages:
+                del self.original_messages[original_msg_id]
+            if original_msg_id in self.edit_cooldown:
+                del self.edit_cooldown[original_msg_id]
             self.save_message_mapping()
             
         except Exception as e:
@@ -1201,6 +1262,8 @@ class NiftyForwarder:
             self.logger.info(f"🔍 Monitoring for keywords: {', '.join(self.keywords)}")
             self.logger.info(f"📁 Message mapping loaded: {len(self.message_mapping)} entries")
             self.logger.info("💾 Message mappings persist across restarts for edit/delete handling")
+            self.logger.info("🎯 Premium emoji protection: Enabled (prevents false edit triggers)")
+            self.logger.info(f"⚡ Forward delay: {DEFAULT_CONFIG['FORWARD_DELAY']}s (optimized for speed)")
             self.logger.info("📞 Need help? Contact @ItsHarshX for support!")
             self.logger.info("⏹️  Press Ctrl+C to stop.")
             
@@ -1300,6 +1363,8 @@ class NiftyForwarder:
             print("⏳ Please wait while we initialize...")
             print("💡 The forwarder will run in the background.")
             print("📋 Check the logs for real-time activity.")
+            print("🎯 Premium emoji protection is now active!")
+            print("⚡ Fast forwarding: 0.5s delay between channels (optimized for speed)")
             print("⏹️  Press Ctrl+C to stop the forwarder.")
             
             # Run the async main function
