@@ -2,7 +2,8 @@
 """
 NiftyForwarder - Telegram Message Forwarder with Keyword Filtering
 Author: @ItsHarshX
-Description: Monitors source channels and forwards messages containing specific keywords to target channels
+Description: Monitors source channels and forwards messages containing specific keywords to target channels.
+Features persistent message mapping for handling edits/deletions across restarts.
 Support: Contact @ItsHarshX for support and updates
 """
 
@@ -123,6 +124,10 @@ class NiftyForwarder:
         self.logger = logging.getLogger(__name__)
         self.settings_manager = SettingsManager()
         
+        # ADD THIS LINE:
+        self.message_mapping = {}  # Maps original_msg_id -> [forwarded_msg_id1, forwarded_msg_id2, ...]
+        self.message_mapping_file = 'nifty_message_mapping.json'
+        
         # Initialize settings
         self.api_id = None
         self.api_hash = None
@@ -131,6 +136,77 @@ class NiftyForwarder:
         self.target_channels = []
         self.keywords = []
         self.case_sensitive = False
+        
+    def load_message_mapping(self):
+        """Load message mapping from file"""
+        try:
+            if os.path.exists(self.message_mapping_file):
+                with open(self.message_mapping_file, 'r') as f:
+                    # Load as strings and convert keys to integers
+                    data = json.load(f)
+                    self.message_mapping = {int(k): v for k, v in data.items()}
+                    self.logger.info(f"📁 Loaded {len(self.message_mapping)} message mappings from file")
+            else:
+                self.message_mapping = {}
+                self.logger.info("📁 No existing message mapping file found, starting fresh")
+        except Exception as e:
+            self.logger.error(f"❌ Error loading message mapping: {e}")
+            self.message_mapping = {}
+            
+    def save_message_mapping(self):
+        """Save message mapping to file"""
+        try:
+            # Convert integer keys to strings for JSON compatibility
+            data = {str(k): v for k, v in self.message_mapping.items()}
+            with open(self.message_mapping_file, 'w') as f:
+                json.dump(data, f, indent=2)
+            self.logger.debug(f"💾 Saved message mapping with {len(self.message_mapping)} entries")
+        except Exception as e:
+            self.logger.error(f"❌ Error saving message mapping: {e}")
+            
+    def cleanup_old_mappings(self, max_age_days=30):
+        """Clean up old message mappings to prevent file from growing too large"""
+        try:
+            if not self.message_mapping:
+                return
+                
+            # For simplicity, we'll just keep the most recent 1000 mappings
+            # In a production environment, you might want to implement time-based cleanup
+            if len(self.message_mapping) > 1000:
+                # Keep only the 1000 most recent mappings (assuming higher IDs are more recent)
+                sorted_keys = sorted(self.message_mapping.keys(), reverse=True)
+                keys_to_keep = sorted_keys[:1000]
+                
+                old_count = len(self.message_mapping)
+                self.message_mapping = {k: self.message_mapping[k] for k in keys_to_keep}
+                
+                self.logger.info(f"🧹 Cleaned up message mapping: {old_count} -> {len(self.message_mapping)} entries")
+                self.save_message_mapping()
+        except Exception as e:
+            self.logger.error(f"❌ Error cleaning up message mappings: {e}")
+            
+    def show_mapping_statistics(self):
+        """Show detailed message mapping statistics for debugging"""
+        if not self.message_mapping:
+            print("📁 No message mappings found.")
+            return
+            
+        print(f"📊 Message Mapping Statistics:")
+        print(f"   Total entries: {len(self.message_mapping)}")
+        
+        # Show some sample mappings
+        sample_size = min(5, len(self.message_mapping))
+        if sample_size > 0:
+            print(f"   Sample mappings (latest {sample_size}):")
+            sorted_keys = sorted(self.message_mapping.keys(), reverse=True)
+            for i, key in enumerate(sorted_keys[:sample_size]):
+                forwarded_count = len(self.message_mapping[key])
+                print(f"      Message {key} -> {forwarded_count} forwarded copies")
+                
+        # Show file size if it exists
+        if os.path.exists(self.message_mapping_file):
+            file_size = os.path.getsize(self.message_mapping_file)
+            print(f"   File size: {file_size:,} bytes")
         
     def main_menu(self):
         """Main menu for the forwarder"""
@@ -209,6 +285,12 @@ class NiftyForwarder:
         print(f"🔍 Keywords ({len(keywords)}): {', '.join(keywords) if keywords else 'None'}")
         print(f"🔤 Case Sensitive: {'Yes' if self.settings_manager.get('case_sensitive', False) else 'No'}")
         
+        # Show message mapping statistics
+        mapping_count = len(self.message_mapping) if hasattr(self, 'message_mapping') else 0
+        print(f"📁 Message Mappings: {mapping_count} entries")
+        if mapping_count > 0:
+            print(f"📊 (For tracking edits/deletions across restarts)")
+        
     def modify_settings_menu(self):
         """Menu for modifying existing settings"""
         while True:
@@ -271,6 +353,11 @@ class NiftyForwarder:
                     for file_path in session_files:
                         if os.path.exists(file_path):
                             os.remove(file_path)
+                    
+                    # Remove message mapping file
+                    if os.path.exists(self.message_mapping_file):
+                        os.remove(self.message_mapping_file)
+                        self.logger.info(f"📁 Deleted message mapping file: {self.message_mapping_file}")
                     
                     print("✅ All settings have been reset!")
                     input("\nPress Enter to continue...")
@@ -455,6 +542,9 @@ class NiftyForwarder:
             else:
                 self.logger.info("Session found and user is authorized!")
                 
+            # Load message mapping for handling edits/deletions
+            self.load_message_mapping()
+            
             # Get user info
             me = await self.client.get_me()
             self.logger.info(f"Logged in as: {me.first_name} {me.last_name or ''} (@{me.username or 'No username'})")
@@ -561,6 +651,15 @@ class NiftyForwarder:
         async def handle_new_message(event):
             await self.forward_message(event, target_entities)
             
+        # ADD THESE TWO NEW HANDLERS:
+        @self.client.on(events.MessageEdited(chats=source_entities))
+        async def handle_edited_message(event):
+            await self.handle_message_edit(event, target_entities)
+
+        @self.client.on(events.MessageDeleted)
+        async def handle_deleted_message(event):
+            await self.handle_message_deletion(event, target_entities)
+            
         self.logger.info(f"🎯 Event handlers set up for {len(source_entities)} source(s) and {len(target_entities)} target(s)")
         return True
         
@@ -616,16 +715,21 @@ class NiftyForwarder:
             
             # Forward to all target channels
             forwarded_count = 0
+            forwarded_message_ids = []  # ADD THIS LINE
+            
             for target_entity in target_entities:
                 try:
                     # Apply rate limiting
                     await asyncio.sleep(DEFAULT_CONFIG['FORWARD_DELAY'])
                     
                     # Send message as new message (copy) instead of forward to avoid forward tags
-                    await self.client.send_message(
+                    sent_message = await self.client.send_message(  # CHANGE: store the returned message
                         entity=target_entity,
                         message=event.message
                     )
+                    
+                    # ADD THIS LINE:
+                    forwarded_message_ids.append(sent_message.id)
                     
                     target_name = getattr(target_entity, 'title', '') or getattr(target_entity, 'first_name', 'Unknown')
                     self.logger.info(f"✅ Message sent to {target_name}")
@@ -637,10 +741,11 @@ class NiftyForwarder:
                     
                     # Retry sending after wait
                     try:
-                        await self.client.send_message(
+                        sent_message = await self.client.send_message(
                             entity=target_entity,
                             message=event.message
                         )
+                        forwarded_message_ids.append(sent_message.id)
                         forwarded_count += 1
                     except Exception as retry_error:
                         self.logger.error(f"❌ Retry failed for {target_entity}: {retry_error}")
@@ -648,10 +753,112 @@ class NiftyForwarder:
                 except Exception as e:
                     self.logger.error(f"❌ Failed to send message to {target_entity}: {e}")
                     
+            # ADD THIS AFTER THE LOOP:
+            # Store message mapping for future edits/deletions
+            if forwarded_message_ids:
+                self.message_mapping[event.message.id] = forwarded_message_ids
+                self.save_message_mapping()
+                
+                # Periodically clean up old mappings
+                if len(self.message_mapping) % 100 == 0:  # Every 100 new messages
+                    self.cleanup_old_mappings()
+                
             self.logger.info(f"📊 Message sent to {forwarded_count}/{len(target_entities)} channels")
                     
         except Exception as e:
             self.logger.error(f"❌ Error in forward_message: {e}")
+            
+    async def handle_message_edit(self, event, target_entities):
+        """Handle edited messages and update forwarded messages"""
+        try:
+            # Get message text
+            message_text = event.message.text or ""
+            
+            # Check if message still contains keywords after edit
+            if not self.check_keyword_match(message_text):
+                self.logger.info(f"🔄 Edited message no longer contains keywords, considering deletion...")
+                # Optionally delete the forwarded messages since they no longer match
+                await self.handle_message_deletion_by_id(event.message.id, target_entities)
+                return
+            
+            # Check if we have forwarded messages for this original message
+            if event.message.id not in self.message_mapping:
+                self.logger.debug(f"⏭️ No forwarded messages found for edited message ID: {event.message.id}")
+                return
+            
+            forwarded_ids = self.message_mapping[event.message.id]
+            
+            self.logger.info(f"✏️ Handling message edit for {len(forwarded_ids)} forwarded messages")
+            
+            # Edit all forwarded messages
+            for i, target_entity in enumerate(target_entities):
+                if i < len(forwarded_ids):
+                    try:
+                        await asyncio.sleep(DEFAULT_CONFIG['FORWARD_DELAY'])
+                        
+                        # Edit the forwarded message
+                        await self.client.edit_message(
+                            entity=target_entity,
+                            message=forwarded_ids[i],
+                            text=event.message.text,
+                            file=event.message.media
+                        )
+                        
+                        target_name = getattr(target_entity, 'title', '') or getattr(target_entity, 'first_name', 'Unknown')
+                        self.logger.info(f"✅ Message edited in {target_name}")
+                        
+                    except Exception as e:
+                        self.logger.error(f"❌ Failed to edit message in {target_entity}: {e}")
+            
+        except Exception as e:
+            self.logger.error(f"❌ Error in handle_message_edit: {e}")
+
+    async def handle_message_deletion(self, event, target_entities):
+        """Handle deleted messages and delete forwarded messages"""
+        try:
+            # MessageDeleted event contains a list of deleted message IDs
+            for deleted_id in event.deleted_ids:
+                await self.handle_message_deletion_by_id(deleted_id, target_entities)
+                    
+        except Exception as e:
+            self.logger.error(f"❌ Error in handle_message_deletion: {e}")
+
+    async def handle_message_deletion_by_id(self, original_msg_id, target_entities):
+        """Handle deletion of a specific message ID"""
+        try:
+            # Check if we have forwarded messages for this original message
+            if original_msg_id not in self.message_mapping:
+                self.logger.debug(f"⏭️ No forwarded messages found for deleted message ID: {original_msg_id}")
+                return
+            
+            forwarded_ids = self.message_mapping[original_msg_id]
+            
+            self.logger.info(f"🗑️ Handling message deletion for {len(forwarded_ids)} forwarded messages")
+            
+            # Delete all forwarded messages
+            for i, target_entity in enumerate(target_entities):
+                if i < len(forwarded_ids):
+                    try:
+                        await asyncio.sleep(DEFAULT_CONFIG['FORWARD_DELAY'])
+                        
+                        # Delete the forwarded message
+                        await self.client.delete_messages(
+                            entity=target_entity,
+                            message_ids=[forwarded_ids[i]]
+                        )
+                        
+                        target_name = getattr(target_entity, 'title', '') or getattr(target_entity, 'first_name', 'Unknown')
+                        self.logger.info(f"✅ Message deleted from {target_name}")
+                        
+                    except Exception as e:
+                        self.logger.error(f"❌ Failed to delete message from {target_entity}: {e}")
+            
+            # Remove from mapping since messages are deleted
+            del self.message_mapping[original_msg_id]
+            self.save_message_mapping()
+            
+        except Exception as e:
+            self.logger.error(f"❌ Error in handle_message_deletion_by_id: {e}")
             
     def should_forward_message(self, event):
         """Check if message should be forwarded based on filters"""
@@ -694,6 +901,8 @@ class NiftyForwarder:
                 
             self.logger.info("🎉 NiftyForwarder is now running 24/7 with keyword filtering!")
             self.logger.info(f"🔍 Monitoring for keywords: {', '.join(self.keywords)}")
+            self.logger.info(f"📁 Message mapping loaded: {len(self.message_mapping)} entries")
+            self.logger.info("💾 Message mappings persist across restarts for edit/delete handling")
             self.logger.info("📞 Need help? Contact @ItsHarshX for support!")
             self.logger.info("⏹️  Press Ctrl+C to stop.")
             
@@ -713,41 +922,45 @@ class NiftyForwarder:
                 await self.client.disconnect()
                 self.logger.info("🔌 Client disconnected.")
                 
+            # Save message mapping one final time before exit
+            self.save_message_mapping()
+            self.logger.info("💾 Final message mapping saved.")
+                
     def start(self):
-    """Start the forwarder"""
-    try:
-        # Print banner
-        print_banner()
-        
-        # Show main menu and get user choice
-        should_start = self.interactive_setup()
-        
-        if not should_start:
-            print("👋 Exiting NiftyForwarder...")
-            return
-        
-        # Save settings before starting
-        if not self.save_current_settings():
-            print("⚠️  Warning: Could not save settings!")
-        
-        print("\n🚀 Starting NiftyForwarder...")
-        print("⏳ Please wait while we initialize...")
-        
-        # Run the async main function
-        asyncio.run(self.run())
-        
-    except KeyboardInterrupt:
-        self.logger.info("⏹️  NiftyForwarder stopped by user.")
-        
-    except Exception as e:
-        self.logger.error(f"❌ Failed to start NiftyForwarder: {e}")
-        self.logger.error("📞 Contact @ItsHarshX for assistance!")
-        print(f"❌ Fatal error: {e}")
-        print("📞 Contact @ItsHarshX for support!")
-        
-    finally:
-        print("\n🔌 NiftyForwarder session ended.")
-        print("📞 For support and updates, contact @ItsHarshX")
+        """Start the forwarder"""
+        try:
+            # Print banner
+            print_banner()
+            
+            # Show main menu and get user choice
+            should_start = self.interactive_setup()
+            
+            if not should_start:
+                print("👋 Exiting NiftyForwarder...")
+                return
+            
+            # Save settings before starting
+            if not self.save_current_settings():
+                print("⚠️  Warning: Could not save settings!")
+            
+            print("\n🚀 Starting NiftyForwarder...")
+            print("⏳ Please wait while we initialize...")
+            
+            # Run the async main function
+            asyncio.run(self.run())
+            
+        except KeyboardInterrupt:
+            self.logger.info("⏹️  NiftyForwarder stopped by user.")
+            
+        except Exception as e:
+            self.logger.error(f"❌ Failed to start NiftyForwarder: {e}")
+            self.logger.error("📞 Contact @ItsHarshX for assistance!")
+            print(f"❌ Fatal error: {e}")
+            print("📞 Contact @ItsHarshX for support!")
+            
+        finally:
+            print("\n🔌 NiftyForwarder session ended.")
+            print("📞 For support and updates, contact @ItsHarshX")
 
 
 # Main execution
