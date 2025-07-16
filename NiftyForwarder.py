@@ -28,40 +28,103 @@ logger = logging.getLogger(__name__)
 
 class Colors:
     """ANSI color codes for terminal output"""
-    RESET = '\033[0m'
-    BOLD = '\033[1m'
-    DIM = '\033[2m'
-    UNDERLINE = '\033[4m'
+    # Check if colors are supported
+    _colors_supported = None
+    
+    @classmethod
+    def supports_color(cls):
+        """Check if terminal supports ANSI colors"""
+        if cls._colors_supported is not None:
+            return cls._colors_supported
+        
+        # Check if we're in a supported terminal
+        if os.name == 'nt':  # Windows
+            try:
+                # Try to enable ANSI support on Windows
+                import ctypes
+                kernel32 = ctypes.windll.kernel32
+                kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
+                cls._colors_supported = True
+            except:
+                # If ANSI support fails, check if we're in a modern terminal
+                cls._colors_supported = os.environ.get('TERM') is not None or 'ANSICON' in os.environ
+        else:
+            # Unix-like systems usually support colors
+            cls._colors_supported = True
+        
+        return cls._colors_supported
+    
+    @classmethod
+    def get_color(cls, color_code):
+        """Get color code if supported, otherwise return empty string"""
+        return color_code if cls.supports_color() else ""
+    
+    # Color codes - will return empty string if not supported
+    @property
+    def RESET(self): return self.get_color('\033[0m')
+    @property
+    def BOLD(self): return self.get_color('\033[1m')
+    @property
+    def DIM(self): return self.get_color('\033[2m')
+    @property
+    def UNDERLINE(self): return self.get_color('\033[4m')
     
     # Regular colors
-    BLACK = '\033[30m'
-    RED = '\033[31m'
-    GREEN = '\033[32m'
-    YELLOW = '\033[33m'
-    BLUE = '\033[34m'
-    MAGENTA = '\033[35m'
-    CYAN = '\033[36m'
-    WHITE = '\033[37m'
+    @property
+    def BLACK(self): return self.get_color('\033[30m')
+    @property
+    def RED(self): return self.get_color('\033[31m')
+    @property
+    def GREEN(self): return self.get_color('\033[32m')
+    @property
+    def YELLOW(self): return self.get_color('\033[33m')
+    @property
+    def BLUE(self): return self.get_color('\033[34m')
+    @property
+    def MAGENTA(self): return self.get_color('\033[35m')
+    @property
+    def CYAN(self): return self.get_color('\033[36m')
+    @property
+    def WHITE(self): return self.get_color('\033[37m')
     
     # Bright colors
-    BRIGHT_BLACK = '\033[90m'
-    BRIGHT_RED = '\033[91m'
-    BRIGHT_GREEN = '\033[92m'
-    BRIGHT_YELLOW = '\033[93m'
-    BRIGHT_BLUE = '\033[94m'
-    BRIGHT_MAGENTA = '\033[95m'
-    BRIGHT_CYAN = '\033[96m'
-    BRIGHT_WHITE = '\033[97m'
+    @property
+    def BRIGHT_BLACK(self): return self.get_color('\033[90m')
+    @property
+    def BRIGHT_RED(self): return self.get_color('\033[91m')
+    @property
+    def BRIGHT_GREEN(self): return self.get_color('\033[92m')
+    @property
+    def BRIGHT_YELLOW(self): return self.get_color('\033[93m')
+    @property
+    def BRIGHT_BLUE(self): return self.get_color('\033[94m')
+    @property
+    def BRIGHT_MAGENTA(self): return self.get_color('\033[95m')
+    @property
+    def BRIGHT_CYAN(self): return self.get_color('\033[96m')
+    @property
+    def BRIGHT_WHITE(self): return self.get_color('\033[97m')
     
     # Background colors
-    BG_BLACK = '\033[40m'
-    BG_RED = '\033[41m'
-    BG_GREEN = '\033[42m'
-    BG_YELLOW = '\033[43m'
-    BG_BLUE = '\033[44m'
-    BG_MAGENTA = '\033[45m'
-    BG_CYAN = '\033[46m'
-    BG_WHITE = '\033[47m'
+    @property
+    def BG_BLACK(self): return self.get_color('\033[40m')
+    @property
+    def BG_RED(self): return self.get_color('\033[41m')
+    @property
+    def BG_GREEN(self): return self.get_color('\033[42m')
+    @property
+    def BG_YELLOW(self): return self.get_color('\033[43m')
+    @property
+    def BG_BLUE(self): return self.get_color('\033[44m')
+    @property
+    def BG_MAGENTA(self): return self.get_color('\033[45m')
+    @property
+    def BG_CYAN(self): return self.get_color('\033[46m')
+    @property
+    def BG_WHITE(self): return self.get_color('\033[47m')
+
+# Create a global instance
+colors = Colors()
 
 class TelegramForwarder:
     def __init__(self):
@@ -82,65 +145,100 @@ class TelegramForwarder:
         self.preserve_formatting = True  # Always preserve original formatting (HARDCODED)
         self.custom_emoji_cache = {}  # Cache for custom emoji document IDs
         
+    def safe_input(self, prompt, default=""):
+        """Safe input function that handles EOFError gracefully"""
+        try:
+            return input(prompt)
+        except EOFError:
+            print(f"\n{colors.BRIGHT_RED}⚠️ Input stream closed. Using default value.{colors.RESET}")
+            return default
+        except KeyboardInterrupt:
+            print(f"\n{colors.BRIGHT_YELLOW}⚠️ Operation cancelled by user.{colors.RESET}")
+            return default
+        except Exception as e:
+            print(f"\n{colors.BRIGHT_RED}⚠️ Input error: {e}. Using default value.{colors.RESET}")
+            return default
+    
     def clear_screen(self):
         """Clear the terminal screen"""
-        os.system('cls' if os.name == 'nt' else 'clear')
+        try:
+            os.system('cls' if os.name == 'nt' else 'clear')
+        except:
+            # If clearing fails, just print newlines
+            print('\n' * 50)
     
     def print_loading_animation(self, text="Loading", duration=2):
         """Print a loading animation"""
+        if not colors.supports_color():
+            print(f"🔄 {text}...")
+            time.sleep(duration)
+            print(f"✓ {text} complete!")
+            return
+            
         frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
         end_time = time.time() + duration
         
-        while time.time() < end_time:
-            for frame in frames:
-                print(f"\r{Colors.CYAN}{frame} {text}...{Colors.RESET}", end="", flush=True)
-                time.sleep(0.1)
-                if time.time() >= end_time:
-                    break
-        print(f"\r{Colors.GREEN}✓ {text} complete!{Colors.RESET}")
+        try:
+            while time.time() < end_time:
+                for frame in frames:
+                    print(f"\r{colors.CYAN}{frame} {text}...{colors.RESET}", end="", flush=True)
+                    time.sleep(0.1)
+                    if time.time() >= end_time:
+                        break
+            print(f"\r{colors.GREEN}✓ {text} complete!{colors.RESET}")
+        except:
+            print(f"\r✓ {text} complete!")
+        
         time.sleep(0.5)
     
     def print_success(self, message):
         """Print success message with green color"""
-        print(f"{Colors.GREEN}✅ {message}{Colors.RESET}")
+        print(f"{colors.GREEN}✅ {message}{colors.RESET}")
     
     def print_error(self, message):
         """Print error message with red color"""
-        print(f"{Colors.RED}❌ {message}{Colors.RESET}")
+        print(f"{colors.RED}❌ {message}{colors.RESET}")
     
     def print_warning(self, message):
         """Print warning message with yellow color"""
-        print(f"{Colors.YELLOW}⚠️ {message}{Colors.RESET}")
+        print(f"{colors.YELLOW}⚠️ {message}{colors.RESET}")
     
     def print_info(self, message):
         """Print info message with blue color"""
-        print(f"{Colors.BLUE}ℹ️ {message}{Colors.RESET}")
+        print(f"{colors.BLUE}ℹ️ {message}{colors.RESET}")
     
     def print_header(self, text):
         """Print a styled header"""
-        print(f"\n{Colors.BOLD}{Colors.BRIGHT_CYAN}{'='*60}{Colors.RESET}")
-        print(f"{Colors.BOLD}{Colors.BRIGHT_CYAN}{text.center(60)}{Colors.RESET}")
-        print(f"{Colors.BOLD}{Colors.BRIGHT_CYAN}{'='*60}{Colors.RESET}")
+        print(f"\n{colors.BOLD}{colors.BRIGHT_CYAN}{'='*60}{colors.RESET}")
+        print(f"{colors.BOLD}{colors.BRIGHT_CYAN}{text.center(60)}{colors.RESET}")
+        print(f"{colors.BOLD}{colors.BRIGHT_CYAN}{'='*60}{colors.RESET}")
     
     def print_separator(self):
         """Print a visual separator"""
-        print(f"{Colors.DIM}{'─' * 60}{Colors.RESET}")
+        print(f"{colors.DIM}{'─' * 60}{colors.RESET}")
     
     def animate_text(self, text, delay=0.05):
         """Animate text character by character"""
-        for char in text:
-            print(char, end='', flush=True)
-            time.sleep(delay)
-        print()
+        if not colors.supports_color():
+            print(text)
+            return
+            
+        try:
+            for char in text:
+                print(char, end='', flush=True)
+                time.sleep(delay)
+            print()
+        except:
+            print(text)
     
     def get_status_color(self, status):
         """Get color for status display"""
         if status == "Yes" or status == "Online":
-            return Colors.GREEN
+            return colors.GREEN
         elif status == "No" or status == "Offline":
-            return Colors.RED
+            return colors.RED
         else:
-            return Colors.YELLOW
+            return colors.YELLOW
     
     def load_config(self):
         """Load configuration from file"""
@@ -251,35 +349,35 @@ class TelegramForwarder:
         self.clear_screen()
         
         # Animated header
-        print(f"{Colors.BOLD}{Colors.BRIGHT_MAGENTA}")
+        print(f"{colors.BOLD}{colors.BRIGHT_MAGENTA}")
         time.sleep(0.2)
         
         banner = f"""
-{Colors.BRIGHT_CYAN}╔══════════════════════════════════════════════════════════════════════════════════════╗
-{Colors.BRIGHT_CYAN}║{Colors.BRIGHT_WHITE}                                                                                      {Colors.BRIGHT_CYAN}║
-{Colors.BRIGHT_CYAN}║{Colors.BRIGHT_YELLOW}      ███╗   ██╗██╗███████╗████████╗██╗   ██╗    ██████╗  ██████╗  ██████╗ ██╗       {Colors.BRIGHT_CYAN}║
-{Colors.BRIGHT_CYAN}║{Colors.BRIGHT_YELLOW}      ████╗  ██║██║██╔════╝╚══██╔══╝╚██╗ ██╔╝    ██╔══██╗██╔═══██╗██╔═══██╗██║       {Colors.BRIGHT_CYAN}║
-{Colors.BRIGHT_CYAN}║{Colors.BRIGHT_YELLOW}      ██╔██╗ ██║██║█████╗     ██║    ╚████╔╝     ██████╔╝██║   ██║██║   ██║██║       {Colors.BRIGHT_CYAN}║
-{Colors.BRIGHT_CYAN}║{Colors.BRIGHT_YELLOW}      ██║╚██╗██║██║██╔══╝     ██║     ╚██╔╝      ██╔═══╝ ██║   ██║██║   ██║██║       {Colors.BRIGHT_CYAN}║
-{Colors.BRIGHT_CYAN}║{Colors.BRIGHT_YELLOW}      ██║ ╚████║██║██║        ██║      ██║       ██║     ╚██████╔╝╚██████╔╝███████╗  {Colors.BRIGHT_CYAN}║
-{Colors.BRIGHT_CYAN}║{Colors.BRIGHT_YELLOW}      ╚═╝  ╚═══╝╚═╝╚═╝        ╚═╝      ╚═╝       ╚═╝      ╚═════╝  ╚═════╝ ╚══════╝  {Colors.BRIGHT_CYAN}║
-{Colors.BRIGHT_CYAN}║{Colors.BRIGHT_WHITE}                                                                                      {Colors.BRIGHT_CYAN}║
-{Colors.BRIGHT_CYAN}║{Colors.BRIGHT_GREEN}                    🚀 Advanced Telegram Message Forwarder with Keywords 🚀          {Colors.BRIGHT_CYAN}║
-{Colors.BRIGHT_CYAN}║{Colors.BRIGHT_WHITE}                                                                                      {Colors.BRIGHT_CYAN}║
-{Colors.BRIGHT_CYAN}║{Colors.BRIGHT_MAGENTA}                              📞 Contact Support: @ItsHarshX                         {Colors.BRIGHT_CYAN}║
-{Colors.BRIGHT_CYAN}║{Colors.BRIGHT_MAGENTA}                              📧 For updates and assistance                          {Colors.BRIGHT_CYAN}║
-{Colors.BRIGHT_CYAN}║{Colors.BRIGHT_WHITE}                                                                                      {Colors.BRIGHT_CYAN}║
-{Colors.BRIGHT_CYAN}║{Colors.BRIGHT_GREEN}                        ✨ Forward messages with keyword filtering ✨               {Colors.BRIGHT_CYAN}║
-{Colors.BRIGHT_CYAN}║{Colors.BRIGHT_WHITE}                                                                                      {Colors.BRIGHT_CYAN}║
-{Colors.BRIGHT_CYAN}╚══════════════════════════════════════════════════════════════════════════════════════╝{Colors.RESET}
+{colors.BRIGHT_CYAN}╔══════════════════════════════════════════════════════════════════════════════════════╗
+{colors.BRIGHT_CYAN}║{colors.BRIGHT_WHITE}                                                                                      {colors.BRIGHT_CYAN}║
+{colors.BRIGHT_CYAN}║{colors.BRIGHT_YELLOW}      ███╗   ██╗██╗███████╗████████╗██╗   ██╗    ██████╗  ██████╗  ██████╗ ██╗       {colors.BRIGHT_CYAN}║
+{colors.BRIGHT_CYAN}║{colors.BRIGHT_YELLOW}      ████╗  ██║██║██╔════╝╚══██╔══╝╚██╗ ██╔╝    ██╔══██╗██╔═══██╗██╔═══██╗██║       {colors.BRIGHT_CYAN}║
+{colors.BRIGHT_CYAN}║{colors.BRIGHT_YELLOW}      ██╔██╗ ██║██║█████╗     ██║    ╚████╔╝     ██████╔╝██║   ██║██║   ██║██║       {colors.BRIGHT_CYAN}║
+{colors.BRIGHT_CYAN}║{colors.BRIGHT_YELLOW}      ██║╚██╗██║██║██╔══╝     ██║     ╚██╔╝      ██╔═══╝ ██║   ██║██║   ██║██║       {colors.BRIGHT_CYAN}║
+{colors.BRIGHT_CYAN}║{colors.BRIGHT_YELLOW}      ██║ ╚████║██║██║        ██║      ██║       ██║     ╚██████╔╝╚██████╔╝███████╗  {colors.BRIGHT_CYAN}║
+{colors.BRIGHT_CYAN}║{colors.BRIGHT_YELLOW}      ╚═╝  ╚═══╝╚═╝╚═╝        ╚═╝      ╚═╝       ╚═╝      ╚═════╝  ╚═════╝ ╚══════╝  {colors.BRIGHT_CYAN}║
+{colors.BRIGHT_CYAN}║{colors.BRIGHT_WHITE}                                                                                      {colors.BRIGHT_CYAN}║
+{colors.BRIGHT_CYAN}║{colors.BRIGHT_GREEN}                    🚀 Advanced Telegram Message Forwarder with Keywords 🚀          {colors.BRIGHT_CYAN}║
+{colors.BRIGHT_CYAN}║{colors.BRIGHT_WHITE}                                                                                      {colors.BRIGHT_CYAN}║
+{colors.BRIGHT_CYAN}║{colors.BRIGHT_MAGENTA}                              📞 Contact Support: @ItsHarshX                         {colors.BRIGHT_CYAN}║
+{colors.BRIGHT_CYAN}║{colors.BRIGHT_MAGENTA}                              📧 For updates and assistance                          {colors.BRIGHT_CYAN}║
+{colors.BRIGHT_CYAN}║{colors.BRIGHT_WHITE}                                                                                      {colors.BRIGHT_CYAN}║
+{colors.BRIGHT_CYAN}║{colors.BRIGHT_GREEN}                        ✨ Forward messages with keyword filtering ✨               {colors.BRIGHT_CYAN}║
+{colors.BRIGHT_CYAN}║{colors.BRIGHT_WHITE}                                                                                      {colors.BRIGHT_CYAN}║
+{colors.BRIGHT_CYAN}╚══════════════════════════════════════════════════════════════════════════════════════╝{colors.RESET}
 """
         
         print(banner)
         
         # Animated welcome message
-        print(f"{Colors.BOLD}{Colors.BRIGHT_WHITE}")
+        print(f"{colors.BOLD}{colors.BRIGHT_WHITE}")
         self.animate_text("🎯 Welcome to NiftyPool Telegram Forwarder!", 0.03)
-        print(f"{Colors.RESET}")
+        print(f"{colors.RESET}")
         
         time.sleep(1)
     
@@ -529,10 +627,14 @@ class TelegramForwarder:
                 self.print_info("Get your API credentials from https://my.telegram.org/auth")
                 print()
                 
-                print(f"{Colors.BRIGHT_WHITE}Enter your API credentials:{Colors.RESET}")
-                self.api_id = input(f"{Colors.BRIGHT_CYAN}API ID: {Colors.RESET}").strip()
-                self.api_hash = input(f"{Colors.BRIGHT_CYAN}API Hash: {Colors.RESET}").strip()
-                self.phone_number = input(f"{Colors.BRIGHT_CYAN}Phone Number (with country code): {Colors.RESET}").strip()
+                print(f"{colors.BRIGHT_WHITE}Enter your API credentials:{colors.RESET}")
+                self.api_id = self.safe_input(f"{colors.BRIGHT_CYAN}API ID: {colors.RESET}").strip()
+                self.api_hash = self.safe_input(f"{colors.BRIGHT_CYAN}API Hash: {colors.RESET}").strip()
+                self.phone_number = self.safe_input(f"{colors.BRIGHT_CYAN}Phone Number (with country code): {colors.RESET}").strip()
+                
+                if not self.api_id or not self.api_hash or not self.phone_number:
+                    self.print_error("Required credentials not provided.")
+                    return False
             
             self.print_loading_animation("Connecting to Telegram", 2)
             
@@ -543,12 +645,18 @@ class TelegramForwarder:
                 self.print_info("Sending verification code...")
                 await self.client.send_code_request(self.phone_number)
                 
-                code = input(f"{Colors.BRIGHT_YELLOW}Enter the verification code: {Colors.RESET}").strip()
+                code = self.safe_input(f"{colors.BRIGHT_YELLOW}Enter the verification code: {colors.RESET}").strip()
+                if not code:
+                    self.print_error("Verification code not provided.")
+                    return False
                 
                 try:
                     await self.client.sign_in(self.phone_number, code)
                 except SessionPasswordNeededError:
-                    password = input(f"{Colors.BRIGHT_YELLOW}Enter your 2FA password: {Colors.RESET}").strip()
+                    password = self.safe_input(f"{colors.BRIGHT_YELLOW}Enter your 2FA password: {colors.RESET}").strip()
+                    if not password:
+                        self.print_error("2FA password not provided.")
+                        return False
                     await self.client.sign_in(password=password)
             
             # Check if user has premium
@@ -567,13 +675,13 @@ class TelegramForwarder:
             
             self.save_config()
             
-            input(f"\n{Colors.BRIGHT_GREEN}Press Enter to continue...{Colors.RESET}")
+            self.safe_input(f"\n{colors.BRIGHT_GREEN}Press Enter to continue...{colors.RESET}")
             return True
             
         except Exception as e:
             logger.error(f"Login error: {e}")
             self.print_error(f"Login failed: {e}")
-            input(f"\n{Colors.BRIGHT_RED}Press Enter to continue...{Colors.RESET}")
+            self.safe_input(f"\n{colors.BRIGHT_RED}Press Enter to continue...{colors.RESET}")
             return False
     
     async def get_channel_id(self, channel_input):
@@ -605,9 +713,9 @@ class TelegramForwarder:
         
         while True:
             channel_count += 1
-            channel_input = input(f"{Colors.BRIGHT_CYAN}Channel #{channel_count}: {Colors.RESET}").strip()
+            channel_input = self.safe_input(f"{colors.BRIGHT_CYAN}Channel #{channel_count}: {colors.RESET}", "done").strip()
             
-            if channel_input.lower() == 'done':
+            if channel_input.lower() == 'done' or not channel_input:
                 break
             
             self.print_loading_animation(f"Adding channel: {channel_input}", 1)
@@ -632,7 +740,7 @@ class TelegramForwarder:
         else:
             self.print_warning("No source channels configured")
         
-        input(f"\n{Colors.BRIGHT_GREEN}Press Enter to continue...{Colors.RESET}")
+        self.safe_input(f"\n{colors.BRIGHT_GREEN}Press Enter to continue...{colors.RESET}")
     
     async def set_target_channels(self):
         """Set target channels to forward messages to with enhanced UI"""
@@ -647,9 +755,9 @@ class TelegramForwarder:
         
         while True:
             channel_count += 1
-            channel_input = input(f"{Colors.BRIGHT_CYAN}Channel #{channel_count}: {Colors.RESET}").strip()
+            channel_input = self.safe_input(f"{colors.BRIGHT_CYAN}Channel #{channel_count}: {colors.RESET}", "done").strip()
             
-            if channel_input.lower() == 'done':
+            if channel_input.lower() == 'done' or not channel_input:
                 break
             
             self.print_loading_animation(f"Adding channel: {channel_input}", 1)
@@ -674,7 +782,7 @@ class TelegramForwarder:
         else:
             self.print_warning("No target channels configured")
         
-        input(f"\n{Colors.BRIGHT_GREEN}Press Enter to continue...{Colors.RESET}")
+        self.safe_input(f"\n{colors.BRIGHT_GREEN}Press Enter to continue...{colors.RESET}")
     
     def set_keywords(self):
         """Set keywords to monitor with enhanced UI"""
@@ -683,12 +791,12 @@ class TelegramForwarder:
         self.print_info("Enter keywords to monitor (comma-separated)")
         
         if self.keywords:
-            print(f"{Colors.BRIGHT_WHITE}Current keywords: {Colors.BRIGHT_YELLOW}{', '.join(self.keywords)}{Colors.RESET}")
+            print(f"{colors.BRIGHT_WHITE}Current keywords: {colors.BRIGHT_YELLOW}{', '.join(self.keywords)}{colors.RESET}")
         else:
-            print(f"{Colors.BRIGHT_WHITE}Current keywords: {Colors.RED}None{Colors.RESET}")
+            print(f"{colors.BRIGHT_WHITE}Current keywords: {colors.RED}None{colors.RESET}")
         
         print()
-        keywords_input = input(f"{Colors.BRIGHT_CYAN}Enter keywords: {Colors.RESET}").strip()
+        keywords_input = self.safe_input(f"{colors.BRIGHT_CYAN}Enter keywords: {colors.RESET}", "").strip()
         
         if keywords_input:
             self.keywords = [kw.strip() for kw in keywords_input.split(',') if kw.strip()]
@@ -697,7 +805,7 @@ class TelegramForwarder:
         else:
             self.print_warning("No keywords entered")
         
-        input(f"\n{Colors.BRIGHT_GREEN}Press Enter to continue...{Colors.RESET}")
+        self.safe_input(f"\n{colors.BRIGHT_GREEN}Press Enter to continue...{colors.RESET}")
     
     async def send_message_without_forward_tag(self, source_message, target_channel_id):
         """Send message without forward tag with premium emoji and formatting support"""
@@ -891,7 +999,7 @@ class TelegramForwarder:
             # Check for duplicate message
             if self.is_duplicate_message(message):
                 logger.info(f"Skipping duplicate message from channel {channel_id}")
-                print(f"{Colors.BRIGHT_YELLOW}🛡️ Duplicate message skipped (prevents spam){Colors.RESET}")
+                print(f"{colors.BRIGHT_YELLOW}🛡️ Duplicate message skipped (prevents spam){colors.RESET}")
                 return
             
             # Add message hash to the set
@@ -901,19 +1009,19 @@ class TelegramForwarder:
             source_channel = next((ch for ch in self.source_channels if abs(ch['id']) == channel_id), None)
             if source_channel:
                 logger.info(f"Keyword found in message from '{source_channel['title']}' (ID: {channel_id})")
-                print(f"{Colors.BRIGHT_GREEN}📨 Forwarding message from '{source_channel['title']}'{Colors.RESET}")
+                print(f"{colors.BRIGHT_GREEN}📨 Forwarding message from '{source_channel['title']}'{colors.RESET}")
                 
                 # Show premium emoji info if available
                 if self.is_premium and message.entities:
                     custom_emojis = [e for e in message.entities if isinstance(e, MessageEntityCustomEmoji)]
                     if custom_emojis:
-                        print(f"{Colors.BRIGHT_MAGENTA}🎉 Message contains {len(custom_emojis)} premium emojis - preserving original entities{Colors.RESET}")
+                        print(f"{colors.BRIGHT_MAGENTA}🎉 Message contains {len(custom_emojis)} premium emojis - preserving original entities{colors.RESET}")
                         logger.info(f"Premium emojis detected: {len(custom_emojis)} custom emojis will be preserved")
                     else:
-                        print(f"{Colors.BRIGHT_CYAN}✨ Premium user - will enhance regular emojis to premium format{Colors.RESET}")
+                        print(f"{colors.BRIGHT_CYAN}✨ Premium user - will enhance regular emojis to premium format{colors.RESET}")
                         logger.info("No existing custom emojis found, will attempt enhancement")
                 elif self.is_premium:
-                    print(f"{Colors.BRIGHT_CYAN}✨ Premium user - will enhance regular emojis to premium format{Colors.RESET}")
+                    print(f"{colors.BRIGHT_CYAN}✨ Premium user - will enhance regular emojis to premium format{colors.RESET}")
                     logger.info("Premium user with no entities, will attempt enhancement")
                 
                 # Process the message to show what will be forwarded
@@ -921,19 +1029,19 @@ class TelegramForwarder:
                 display_text = processed_text if processed_text else message.text
                 
                 if len(display_text) > 150:
-                    print(f"{Colors.BRIGHT_WHITE}📝 Message: {display_text[:150]}...{Colors.RESET}")
+                    print(f"{colors.BRIGHT_WHITE}📝 Message: {display_text[:150]}...{colors.RESET}")
                 else:
-                    print(f"{Colors.BRIGHT_WHITE}📝 Message: {display_text}{Colors.RESET}")
+                    print(f"{colors.BRIGHT_WHITE}📝 Message: {display_text}{colors.RESET}")
                 
                 # Show if custom emojis are being preserved or enhanced
                 if self.is_premium and processed_entities:
                     custom_emojis = [e for e in processed_entities if isinstance(e, MessageEntityCustomEmoji)]
                     if custom_emojis:
-                        print(f"{Colors.BRIGHT_GREEN}✨ Premium emojis will be forwarded using original entities{Colors.RESET}")
+                        print(f"{colors.BRIGHT_GREEN}✨ Premium emojis will be forwarded using original entities{colors.RESET}")
                     else:
-                        print(f"{Colors.BRIGHT_BLUE}🚀 Regular emojis will be enhanced to premium format during forwarding{Colors.RESET}")
+                        print(f"{colors.BRIGHT_BLUE}🚀 Regular emojis will be enhanced to premium format during forwarding{colors.RESET}")
                 elif self.is_premium:
-                    print(f"{Colors.BRIGHT_BLUE}🚀 Regular emojis will be enhanced to premium format during forwarding{Colors.RESET}")
+                    print(f"{colors.BRIGHT_BLUE}🚀 Regular emojis will be enhanced to premium format during forwarding{colors.RESET}")
             
             # Forward to all target channels
             forwarded_messages = []
@@ -945,24 +1053,24 @@ class TelegramForwarder:
                             'channel_id': target_channel['id'],
                             'message_id': forwarded_msg.id if hasattr(forwarded_msg, 'id') else forwarded_msg[0].id
                         })
-                        print(f"{Colors.BRIGHT_GREEN}✅ Forwarded to '{target_channel['title']}' with formatting{Colors.RESET}")
+                        print(f"{colors.BRIGHT_GREEN}✅ Forwarded to '{target_channel['title']}' with formatting{colors.RESET}")
                         logger.info(f"Message forwarded to '{target_channel['title']}'")
                     else:
-                        print(f"{Colors.BRIGHT_RED}❌ Failed to forward to '{target_channel['title']}'{Colors.RESET}")
+                        print(f"{colors.BRIGHT_RED}❌ Failed to forward to '{target_channel['title']}'{colors.RESET}")
                         logger.error(f"Failed to forward to '{target_channel['title']}'")
                 except Exception as forward_error:
-                    print(f"{Colors.BRIGHT_RED}❌ Error forwarding to '{target_channel['title']}': {forward_error}{Colors.RESET}")
+                    print(f"{colors.BRIGHT_RED}❌ Error forwarding to '{target_channel['title']}': {forward_error}{colors.RESET}")
                     logger.error(f"Error forwarding to '{target_channel['title']}': {forward_error}")
             
             # Store message mapping for edits/deletions
             if forwarded_messages:
                 self.message_map[f"{channel_id}_{message.id}"] = forwarded_messages
                 self.save_config()
-                print(f"{Colors.BRIGHT_YELLOW}📊 Message forwarded to {len(forwarded_messages)} channels{Colors.RESET}")
+                print(f"{colors.BRIGHT_YELLOW}📊 Message forwarded to {len(forwarded_messages)} channels{colors.RESET}")
             
         except Exception as e:
             logger.error(f"Error handling new message: {e}")
-            print(f"{Colors.BRIGHT_RED}❌ Error handling message: {e}{Colors.RESET}")
+            print(f"{colors.BRIGHT_RED}❌ Error handling message: {e}{colors.RESET}")
     
     async def handle_message_edit(self, event):
         """Handle message edits with formatting preservation"""
@@ -992,7 +1100,7 @@ class TelegramForwarder:
                 return
             
             logger.info(f"Editing forwarded message from channel {channel_id}")
-            print(f"✏️ Editing forwarded message with formatting...")
+            print(f"{colors.BRIGHT_YELLOW}✏️ Editing forwarded message with formatting...{colors.RESET}")
             
             # Process message formatting
             edited_text, entities = self.process_custom_emojis(message)
@@ -1041,14 +1149,14 @@ class TelegramForwarder:
                         parse_mode=parse_mode,
                         formatting_entities=formatting_entities
                     )
-                    print(f"✅ Message edited in target channel with formatting")
+                    print(f"{colors.BRIGHT_GREEN}✅ Message edited in target channel with formatting{colors.RESET}")
                     
                 except Exception as edit_error:
                     if "Content of the message was not modified" in str(edit_error):
                         logger.info(f"Message content unchanged, skipping edit")
                     else:
                         logger.error(f"Error editing message: {edit_error}")
-                        print(f"❌ Error editing message: {edit_error}")
+                        print(f"{colors.BRIGHT_RED}❌ Error editing message: {edit_error}{colors.RESET}")
             
         except Exception as e:
             logger.error(f"Error handling message edit: {e}")
@@ -1068,7 +1176,7 @@ class TelegramForwarder:
                     continue
                 
                 logger.info(f"Deleting forwarded message {deleted_id}")
-                print(f"🗑️ Deleting forwarded message...")
+                print(f"{colors.BRIGHT_YELLOW}🗑️ Deleting forwarded message...{colors.RESET}")
                 
                 # Delete all forwarded messages
                 forwarded_messages = self.message_map[message_key]
@@ -1079,10 +1187,10 @@ class TelegramForwarder:
                             target_entity,
                             forwarded_msg['message_id']
                         )
-                        print(f"✅ Message deleted from target channel")
+                        print(f"{colors.BRIGHT_GREEN}✅ Message deleted from target channel{colors.RESET}")
                     except Exception as e:
                         logger.error(f"Error deleting message: {e}")
-                        print(f"❌ Error deleting message: {e}")
+                        print(f"{colors.BRIGHT_RED}❌ Error deleting message: {e}{colors.RESET}")
                 
                 # Remove from message map
                 del self.message_map[message_key]
@@ -1095,51 +1203,51 @@ class TelegramForwarder:
         """Start the message forwarder with enhanced UI"""
         if not self.client:
             self.print_error("Please login first!")
-            input(f"\n{Colors.BRIGHT_RED}Press Enter to continue...{Colors.RESET}")
+            self.safe_input(f"\n{colors.BRIGHT_RED}Press Enter to continue...{colors.RESET}")
             return
         
         if not self.source_channels:
             self.print_error("Please set source channels first!")
-            input(f"\n{Colors.BRIGHT_RED}Press Enter to continue...{Colors.RESET}")
+            self.safe_input(f"\n{colors.BRIGHT_RED}Press Enter to continue...{colors.RESET}")
             return
         
         if not self.target_channels:
             self.print_error("Please set target channels first!")
-            input(f"\n{Colors.BRIGHT_RED}Press Enter to continue...{Colors.RESET}")
+            self.safe_input(f"\n{colors.BRIGHT_RED}Press Enter to continue...{colors.RESET}")
             return
         
         if not self.keywords:
             self.print_error("Please set keywords first!")
-            input(f"\n{Colors.BRIGHT_RED}Press Enter to continue...{Colors.RESET}")
+            self.safe_input(f"\n{colors.BRIGHT_RED}Press Enter to continue...{colors.RESET}")
             return
         
         self.print_header("🚀 STARTING MESSAGE FORWARDER")
         
-        print(f"{Colors.BRIGHT_GREEN}📥 Monitoring {len(self.source_channels)} source channels:{Colors.RESET}")
+        print(f"{colors.BRIGHT_GREEN}📥 Monitoring {len(self.source_channels)} source channels:{colors.RESET}")
         for ch in self.source_channels:
-            print(f"{Colors.BRIGHT_WHITE}   • {ch['title']} ({ch['input']}){Colors.RESET}")
+            print(f"{colors.BRIGHT_WHITE}   • {ch['title']} ({ch['input']}){colors.RESET}")
         
-        print(f"\n{Colors.BRIGHT_BLUE}📤 Forwarding to {len(self.target_channels)} target channels:{Colors.RESET}")
+        print(f"\n{colors.BRIGHT_BLUE}📤 Forwarding to {len(self.target_channels)} target channels:{colors.RESET}")
         for ch in self.target_channels:
-            print(f"{Colors.BRIGHT_WHITE}   • {ch['title']} ({ch['input']}){Colors.RESET}")
+            print(f"{colors.BRIGHT_WHITE}   • {ch['title']} ({ch['input']}){colors.RESET}")
         
-        print(f"\n{Colors.BRIGHT_YELLOW}🔍 Keywords: {', '.join(self.keywords)}{Colors.RESET}")
+        print(f"\n{colors.BRIGHT_YELLOW}🔍 Keywords: {', '.join(self.keywords)}{colors.RESET}")
         
         premium_status = "Yes" if self.is_premium else "No"
         premium_color = self.get_status_color(premium_status)
-        print(f"{Colors.BRIGHT_WHITE}🌟 Premium: {premium_color}{premium_status}{Colors.RESET}")
+        print(f"{colors.BRIGHT_WHITE}🌟 Premium: {premium_color}{premium_status}{colors.RESET}")
         
         if self.is_premium:
-            print(f"{Colors.BRIGHT_GREEN}   • Auto-enhance regular emojis to premium format{Colors.RESET}")
-            print(f"{Colors.BRIGHT_GREEN}   • Preserve existing custom emoji entities{Colors.RESET}")
-            print(f"{Colors.BRIGHT_GREEN}   • Clean markdown tags for better display{Colors.RESET}")
+            print(f"{colors.BRIGHT_GREEN}   • Auto-enhance regular emojis to premium format{colors.RESET}")
+            print(f"{colors.BRIGHT_GREEN}   • Preserve existing custom emoji entities{colors.RESET}")
+            print(f"{colors.BRIGHT_GREEN}   • Clean markdown tags for better display{colors.RESET}")
         
-        print(f"{Colors.BRIGHT_CYAN}🎨 Formatting: HARDCODED (Markdown: ON, Preserve: ON){Colors.RESET}")
-        print(f"{Colors.BRIGHT_MAGENTA}🛡️ Duplicate prevention: ENABLED ({len(self.message_hashes)} hashes cached){Colors.RESET}")
-        print(f"{Colors.BRIGHT_WHITE}🎯 Forward method: Copy without forward tags + auto-premium emoji enhancement{Colors.RESET}")
+        print(f"{colors.BRIGHT_CYAN}🎨 Formatting: HARDCODED (Markdown: ON, Preserve: ON){colors.RESET}")
+        print(f"{colors.BRIGHT_MAGENTA}🛡️ Duplicate prevention: ENABLED ({len(self.message_hashes)} hashes cached){colors.RESET}")
+        print(f"{colors.BRIGHT_WHITE}🎯 Forward method: Copy without forward tags + auto-premium emoji enhancement{colors.RESET}")
         
-        print(f"\n{Colors.BRIGHT_YELLOW}Press Ctrl+C to stop...{Colors.RESET}")
-        print(f"{Colors.BRIGHT_CYAN}{'═' * 60}{Colors.RESET}")
+        print(f"\n{colors.BRIGHT_YELLOW}Press Ctrl+C to stop...{colors.RESET}")
+        print(f"{colors.BRIGHT_CYAN}{'═' * 60}{colors.RESET}")
         
         # Register event handlers
         source_channel_ids = [ch['id'] for ch in self.source_channels]
@@ -1162,20 +1270,20 @@ class TelegramForwarder:
         try:
             await self.client.run_until_disconnected()
         except KeyboardInterrupt:
-            print(f"\n{Colors.BRIGHT_YELLOW}🛑 Forwarder stopped by user{Colors.RESET}")
-            input(f"\n{Colors.BRIGHT_GREEN}Press Enter to return to menu...{Colors.RESET}")
+            print(f"\n{colors.BRIGHT_YELLOW}🛑 Forwarder stopped by user{colors.RESET}")
+            self.safe_input(f"\n{colors.BRIGHT_GREEN}Press Enter to return to menu...{colors.RESET}")
         except Exception as e:
             logger.error(f"Error in forwarder: {e}")
-            print(f"{Colors.BRIGHT_RED}❌ Error in forwarder: {e}{Colors.RESET}")
-            input(f"\n{Colors.BRIGHT_RED}Press Enter to return to menu...{Colors.RESET}")
+            print(f"{colors.BRIGHT_RED}❌ Error in forwarder: {e}{colors.RESET}")
+            self.safe_input(f"\n{colors.BRIGHT_RED}Press Enter to return to menu...{colors.RESET}")
     
     def show_menu(self):
         """Show the enhanced interactive main menu"""
         self.print_banner()
         
         # Menu header
-        print(f"\n{Colors.BOLD}{Colors.BG_BLUE}{Colors.BRIGHT_WHITE} 🤖 TELEGRAM MESSAGE FORWARDER MENU 🤖 {Colors.RESET}")
-        print(f"{Colors.BRIGHT_CYAN}{'═' * 60}{Colors.RESET}")
+        print(f"\n{colors.BOLD}{colors.BG_BLUE}{colors.BRIGHT_WHITE} 🤖 TELEGRAM MESSAGE FORWARDER MENU 🤖 {colors.RESET}")
+        print(f"{colors.BRIGHT_CYAN}{'═' * 60}{colors.RESET}")
         
         # Menu options with colors and better formatting
         menu_options = [
@@ -1190,69 +1298,69 @@ class TelegramForwarder:
         
         print()
         for num, emoji, title, description in menu_options:
-            print(f"{Colors.BRIGHT_WHITE}[{Colors.BRIGHT_YELLOW}{num}{Colors.BRIGHT_WHITE}] {emoji} {Colors.BOLD}{Colors.BRIGHT_GREEN}{title}{Colors.RESET}")
-            print(f"    {Colors.DIM}{Colors.BRIGHT_BLACK}└── {description}{Colors.RESET}")
+            print(f"{colors.BRIGHT_WHITE}[{colors.BRIGHT_YELLOW}{num}{colors.BRIGHT_WHITE}] {emoji} {colors.BOLD}{colors.BRIGHT_GREEN}{title}{colors.RESET}")
+            print(f"    {colors.DIM}{colors.BRIGHT_BLACK}└── {description}{colors.RESET}")
             print()
         
-        print(f"{Colors.BRIGHT_CYAN}{'═' * 60}{Colors.RESET}")
+        print(f"{colors.BRIGHT_CYAN}{'═' * 60}{colors.RESET}")
         
         # Enhanced status display
         self.show_status_dashboard()
         
-        print(f"{Colors.BRIGHT_CYAN}{'═' * 60}{Colors.RESET}")
+        print(f"{colors.BRIGHT_CYAN}{'═' * 60}{colors.RESET}")
     
     def show_status_dashboard(self):
         """Show an enhanced status dashboard"""
-        print(f"\n{Colors.BOLD}{Colors.BG_GREEN}{Colors.BRIGHT_WHITE} 📊 SYSTEM STATUS DASHBOARD 📊 {Colors.RESET}")
+        print(f"\n{colors.BOLD}{colors.BG_GREEN}{colors.BRIGHT_WHITE} 📊 SYSTEM STATUS DASHBOARD 📊 {colors.RESET}")
         print()
         
         # Connection status
         login_status = "Yes" if self.client else "No"
         login_color = self.get_status_color(login_status)
-        print(f"{Colors.BRIGHT_WHITE}🔐 Connection Status: {login_color}{login_status}{Colors.RESET}")
+        print(f"{colors.BRIGHT_WHITE}🔐 Connection Status: {login_color}{login_status}{colors.RESET}")
         
         # Premium status
         if self.client:
             premium_status = "Yes" if self.is_premium else "No"
             premium_color = self.get_status_color(premium_status)
-            print(f"{Colors.BRIGHT_WHITE}🌟 Premium Account: {premium_color}{premium_status}{Colors.RESET}")
+            print(f"{colors.BRIGHT_WHITE}🌟 Premium Account: {premium_color}{premium_status}{colors.RESET}")
             
             if self.is_premium:
-                print(f"    {Colors.BRIGHT_GREEN}• Auto-enhance regular emojis to premium format{Colors.RESET}")
-                print(f"    {Colors.BRIGHT_GREEN}• Preserve existing custom emoji entities{Colors.RESET}")
-                print(f"    {Colors.BRIGHT_GREEN}• Clean markdown tags for better display{Colors.RESET}")
+                print(f"    {colors.BRIGHT_GREEN}• Auto-enhance regular emojis to premium format{colors.RESET}")
+                print(f"    {colors.BRIGHT_GREEN}• Preserve existing custom emoji entities{colors.RESET}")
+                print(f"    {colors.BRIGHT_GREEN}• Clean markdown tags for better display{colors.RESET}")
         
         # Channels status
         source_count = len(self.source_channels)
         target_count = len(self.target_channels)
         
-        print(f"{Colors.BRIGHT_WHITE}📥 Source Channels: {Colors.BRIGHT_YELLOW}{source_count}{Colors.RESET}")
+        print(f"{colors.BRIGHT_WHITE}📥 Source Channels: {colors.BRIGHT_YELLOW}{source_count}{colors.RESET}")
         if source_count > 0:
             for i, ch in enumerate(self.source_channels[:3]):  # Show first 3
-                print(f"    {Colors.BRIGHT_GREEN}• {ch['title']}{Colors.RESET}")
+                print(f"    {colors.BRIGHT_GREEN}• {ch['title']}{colors.RESET}")
             if source_count > 3:
-                print(f"    {Colors.DIM}... and {source_count - 3} more{Colors.RESET}")
+                print(f"    {colors.DIM}... and {source_count - 3} more{colors.RESET}")
         
-        print(f"{Colors.BRIGHT_WHITE}📤 Target Channels: {Colors.BRIGHT_YELLOW}{target_count}{Colors.RESET}")
+        print(f"{colors.BRIGHT_WHITE}📤 Target Channels: {colors.BRIGHT_YELLOW}{target_count}{colors.RESET}")
         if target_count > 0:
             for i, ch in enumerate(self.target_channels[:3]):  # Show first 3
-                print(f"    {Colors.BRIGHT_GREEN}• {ch['title']}{Colors.RESET}")
+                print(f"    {colors.BRIGHT_GREEN}• {ch['title']}{colors.RESET}")
             if target_count > 3:
-                print(f"    {Colors.DIM}... and {target_count - 3} more{Colors.RESET}")
+                print(f"    {colors.DIM}... and {target_count - 3} more{colors.RESET}")
         
         # Keywords status
         keyword_count = len(self.keywords)
-        print(f"{Colors.BRIGHT_WHITE}🔍 Keywords: {Colors.BRIGHT_YELLOW}{keyword_count}{Colors.RESET}")
+        print(f"{colors.BRIGHT_WHITE}🔍 Keywords: {colors.BRIGHT_YELLOW}{keyword_count}{colors.RESET}")
         if keyword_count > 0:
             keywords_display = ', '.join(self.keywords[:5])  # Show first 5
             if keyword_count > 5:
                 keywords_display += f" ... (+{keyword_count - 5} more)"
-            print(f"    {Colors.BRIGHT_GREEN}{keywords_display}{Colors.RESET}")
+            print(f"    {colors.BRIGHT_GREEN}{keywords_display}{colors.RESET}")
         
         # System features
-        print(f"{Colors.BRIGHT_WHITE}🛡️ Duplicate Prevention: {Colors.BRIGHT_YELLOW}{len(self.message_hashes)} hashes cached{Colors.RESET}")
-        print(f"{Colors.BRIGHT_WHITE}🎨 Formatting: {Colors.BRIGHT_GREEN}HARDCODED (Markdown: ON, Preserve: ON){Colors.RESET}")
-        print(f"{Colors.BRIGHT_WHITE}🎯 Forward Method: {Colors.BRIGHT_GREEN}Copy without forward tags + auto-premium emoji{Colors.RESET}")
+        print(f"{colors.BRIGHT_WHITE}🛡️ Duplicate Prevention: {colors.BRIGHT_YELLOW}{len(self.message_hashes)} hashes cached{colors.RESET}")
+        print(f"{colors.BRIGHT_WHITE}🎨 Formatting: {colors.BRIGHT_GREEN}HARDCODED (Markdown: ON, Preserve: ON){colors.RESET}")
+        print(f"{colors.BRIGHT_WHITE}🎯 Forward Method: {colors.BRIGHT_GREEN}Copy without forward tags + auto-premium emoji{colors.RESET}")
         
         print()
     
@@ -1269,50 +1377,65 @@ class TelegramForwarder:
         self.print_success("✅ Duplicate message prevention: ENABLED")
         self.print_info("💡 These settings provide the best forwarding experience!")
         
-        input(f"\n{Colors.BRIGHT_GREEN}Press Enter to continue to main menu...{Colors.RESET}")
+        self.safe_input(f"\n{colors.BRIGHT_GREEN}Press Enter to continue to main menu...{colors.RESET}")
         
         while True:
-            self.show_menu()
-            choice = input(f"\n{Colors.BRIGHT_YELLOW}➤ Enter your choice (1-7): {Colors.RESET}").strip()
-            
-            if choice == '1':
-                await self.login_telegram()
-            elif choice == '2':
-                await self.start_forwarder()
-            elif choice == '3':
-                if not self.client:
-                    self.print_error("Please login first!")
-                    input(f"\n{Colors.BRIGHT_RED}Press Enter to continue...{Colors.RESET}")
+            try:
+                self.show_menu()
+                choice = self.safe_input(f"\n{colors.BRIGHT_YELLOW}➤ Enter your choice (1-7): {colors.RESET}", "7").strip()
+                
+                if not choice:
+                    choice = "7"  # Default to exit if no input
+                
+                if choice == '1':
+                    await self.login_telegram()
+                elif choice == '2':
+                    await self.start_forwarder()
+                elif choice == '3':
+                    if not self.client:
+                        self.print_error("Please login first!")
+                        self.safe_input(f"\n{colors.BRIGHT_RED}Press Enter to continue...{colors.RESET}")
+                    else:
+                        await self.set_source_channels()
+                elif choice == '4':
+                    if not self.client:
+                        self.print_error("Please login first!")
+                        self.safe_input(f"\n{colors.BRIGHT_RED}Press Enter to continue...{colors.RESET}")
+                    else:
+                        await self.set_target_channels()
+                elif choice == '5':
+                    self.set_keywords()
+                elif choice == '6':
+                    self.print_header("🧹 CLEAR MESSAGE HASHES")
+                    print(f"{colors.BRIGHT_WHITE}Current message hashes: {colors.BRIGHT_YELLOW}{len(self.message_hashes)}{colors.RESET}")
+                    self.print_warning("This will reset duplicate detection and allow previously seen messages to be forwarded again.")
+                    confirm = self.safe_input(f"{colors.BRIGHT_RED}Are you sure you want to clear all message hashes? (y/N): {colors.RESET}", "n").strip().lower()
+                    if confirm == 'y':
+                        self.clear_message_hashes()
+                        self.print_success("All message hashes cleared!")
+                    else:
+                        self.print_info("Operation cancelled.")
+                    self.safe_input(f"\n{colors.BRIGHT_GREEN}Press Enter to continue...{colors.RESET}")
+                elif choice == '7':
+                    print(f"\n{colors.BRIGHT_MAGENTA}👋 Thank you for using NiftyPool Telegram Forwarder!{colors.RESET}")
+                    print(f"{colors.BRIGHT_CYAN}📞 For support: @ItsHarshX{colors.RESET}")
+                    if self.client:
+                        await self.client.disconnect()
+                    break
                 else:
-                    await self.set_source_channels()
-            elif choice == '4':
-                if not self.client:
-                    self.print_error("Please login first!")
-                    input(f"\n{Colors.BRIGHT_RED}Press Enter to continue...{Colors.RESET}")
-                else:
-                    await self.set_target_channels()
-            elif choice == '5':
-                self.set_keywords()
-            elif choice == '6':
-                self.print_header("🧹 CLEAR MESSAGE HASHES")
-                print(f"{Colors.BRIGHT_WHITE}Current message hashes: {Colors.BRIGHT_YELLOW}{len(self.message_hashes)}{Colors.RESET}")
-                self.print_warning("This will reset duplicate detection and allow previously seen messages to be forwarded again.")
-                confirm = input(f"{Colors.BRIGHT_RED}Are you sure you want to clear all message hashes? (y/N): {Colors.RESET}").strip().lower()
-                if confirm == 'y':
-                    self.clear_message_hashes()
-                    self.print_success("All message hashes cleared!")
-                else:
-                    self.print_info("Operation cancelled.")
-                input(f"\n{Colors.BRIGHT_GREEN}Press Enter to continue...{Colors.RESET}")
-            elif choice == '7':
-                print(f"\n{Colors.BRIGHT_MAGENTA}👋 Thank you for using NiftyPool Telegram Forwarder!{Colors.RESET}")
-                print(f"{Colors.BRIGHT_CYAN}📞 For support: @ItsHarshX{Colors.RESET}")
+                    self.print_error("Invalid choice. Please try again.")
+                    self.safe_input(f"\n{colors.BRIGHT_RED}Press Enter to continue...{colors.RESET}")
+                    
+            except KeyboardInterrupt:
+                print(f"\n{colors.BRIGHT_YELLOW}👋 Goodbye!{colors.RESET}")
                 if self.client:
                     await self.client.disconnect()
                 break
-            else:
-                self.print_error("Invalid choice. Please try again.")
-                input(f"\n{Colors.BRIGHT_RED}Press Enter to continue...{Colors.RESET}")
+            except Exception as e:
+                logger.error(f"Unexpected error in main loop: {e}")
+                self.print_error(f"An unexpected error occurred: {e}")
+                self.safe_input(f"\n{colors.BRIGHT_RED}Press Enter to continue...{colors.RESET}")
+                # Don't break, let the user try again
 
 async def main():
     """Main function"""
