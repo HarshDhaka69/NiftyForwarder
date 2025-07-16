@@ -713,7 +713,7 @@ class NiftyForwarder:
                 await self.client.disconnect()
                 self.logger.info("🔌 Client disconnected.")
                 
-   def start(self):
+    def start(self):
     """Start the forwarder"""
     try:
         # Print banner
