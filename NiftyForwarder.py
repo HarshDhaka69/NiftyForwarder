@@ -16,7 +16,20 @@ import re
 import json
 from datetime import datetime
 from telethon import TelegramClient, events
-from telethon.errors import SessionPasswordNeededError, FloodWaitError
+from telethon.errors import (
+    SessionPasswordNeededError, 
+    FloodWaitError, 
+    AuthKeyError, 
+    AuthKeyDuplicatedError,
+    AuthKeyInvalidError,
+    AuthKeyPermEmptyError,
+    AuthKeyUnregisteredError,
+    SecurityError,
+    UnauthorizedError,
+    PhoneCodeInvalidError,
+    PhoneNumberInvalidError,
+    SessionRevokedError
+)
 from telethon.tl.types import PeerChannel, PeerChat, PeerUser
 
 # Default configuration
@@ -137,6 +150,99 @@ class NiftyForwarder:
         self.keywords = []
         self.case_sensitive = False
         
+        # Add session recovery tracking
+        self.session_recovery_attempts = 0
+        self.max_session_recovery_attempts = 3
+        
+    def cleanup_session_files(self):
+        """Clean up corrupted session files"""
+        try:
+            session_files = [
+                f"{self.session_file}.session",
+                f"{self.session_file}.session-journal"
+            ]
+            
+            removed_files = []
+            for file_path in session_files:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                    removed_files.append(file_path)
+                    
+            if removed_files:
+                self.logger.info(f"🧹 Cleaned up session files: {', '.join(removed_files)}")
+                print(f"🧹 Cleaned up corrupted session files: {', '.join(removed_files)}")
+            else:
+                self.logger.info("🧹 No session files found to clean up")
+                
+        except Exception as e:
+            self.logger.error(f"❌ Error cleaning session files: {e}")
+            print(f"❌ Error cleaning session files: {e}")
+            
+    def handle_session_error(self, error):
+        """Handle session-related errors with appropriate recovery"""
+        error_type = type(error).__name__
+        
+        self.logger.error(f"🔐 Session error detected: {error_type} - {error}")
+        
+        # Define session errors that require cleanup
+        session_cleanup_errors = [
+            AuthKeyError,
+            AuthKeyDuplicatedError,
+            AuthKeyInvalidError,
+            AuthKeyPermEmptyError,
+            AuthKeyUnregisteredError,
+            SecurityError,
+            UnauthorizedError,
+            SessionRevokedError
+        ]
+        
+        if any(isinstance(error, err_type) for err_type in session_cleanup_errors):
+            print(f"\n🔐 SESSION ERROR DETECTED: {error_type}")
+            print("This usually happens when:")
+            print("  • Session files are corrupted")
+            print("  • Account was logged out from another device")
+            print("  • API credentials changed")
+            print("  • Telegram servers had issues")
+            print("\n🔧 ATTEMPTING AUTOMATIC RECOVERY...")
+            
+            # Clean up session files
+            self.cleanup_session_files()
+            
+            # Increment recovery attempts
+            self.session_recovery_attempts += 1
+            
+            if self.session_recovery_attempts <= self.max_session_recovery_attempts:
+                print(f"🔄 Recovery attempt {self.session_recovery_attempts}/{self.max_session_recovery_attempts}")
+                return True  # Indicate recovery should be attempted
+            else:
+                print(f"❌ Maximum recovery attempts ({self.max_session_recovery_attempts}) reached")
+                print("📞 Please contact @ItsHarshX for assistance")
+                return False
+        
+        return False
+        
+    async def initialize_client_with_recovery(self):
+        """Initialize client with automatic session recovery"""
+        while self.session_recovery_attempts < self.max_session_recovery_attempts:
+            try:
+                return await self.initialize_client()
+            except (AuthKeyError, AuthKeyDuplicatedError, AuthKeyInvalidError, 
+                    AuthKeyPermEmptyError, AuthKeyUnregisteredError, SecurityError, 
+                    UnauthorizedError, SessionRevokedError) as e:
+                
+                if self.handle_session_error(e):
+                    print("🔄 Retrying client initialization...")
+                    await asyncio.sleep(2)  # Brief delay before retry
+                    continue
+                else:
+                    raise
+            except Exception as e:
+                # For other errors, don't attempt recovery
+                self.logger.error(f"❌ Non-session error during initialization: {e}")
+                raise
+                
+        raise Exception("Failed to initialize client after maximum recovery attempts")
+
     def load_message_mapping(self):
         """Load message mapping from file"""
         try:
@@ -223,10 +329,11 @@ class NiftyForwarder:
                 print("1. 🚀 Start NiftyForwarder")
                 print("2. 🔧 Modify Settings")
                 print("3. 📋 View Current Settings")
-                print("4. 🗑️  Reset All Settings")
-                print("5. ❌ Exit")
+                print("4. 🔐 Fix Session Issues")
+                print("5. 🗑️  Reset All Settings")
+                print("6. ❌ Exit")
                 
-                choice = input("\nEnter your choice (1-5): ").strip()
+                choice = input("\nEnter your choice (1-6): ").strip()
                 
                 if choice == '1':
                     self.load_existing_settings()
@@ -239,13 +346,16 @@ class NiftyForwarder:
                     input("\nPress Enter to continue...")
                     continue  # Stay in main menu
                 elif choice == '4':
-                    self.reset_all_settings()
+                    self.fix_session_issues()
                     continue  # Stay in main menu
                 elif choice == '5':
+                    self.reset_all_settings()
+                    continue  # Stay in main menu
+                elif choice == '6':
                     print("👋 Goodbye!")
                     return False  # Exit
                 else:
-                    print("❌ Invalid choice! Please enter 1-5.")
+                    print("❌ Invalid choice! Please enter 1-6.")
             else:
                 print("🆕 First time setup required!")
                 print("\n📋 MENU OPTIONS:")
@@ -266,7 +376,7 @@ class NiftyForwarder:
     def interactive_setup(self):
         """Interactive setup - now just calls main menu"""
         return self.main_menu()
-            
+             
     def display_current_settings(self):
         """Display current settings"""
         print("\n📋 CURRENT SETTINGS:")
@@ -291,6 +401,48 @@ class NiftyForwarder:
         if mapping_count > 0:
             print(f"📊 (For tracking edits/deletions across restarts)")
         
+    def fix_session_issues(self):
+        """Fix session-related issues without resetting all settings"""
+        print("\n🔐 FIX SESSION ISSUES")
+        print("=" * 30)
+        print("This will fix common session errors like:")
+        print("  • 'security error while unpacking a received msg'")
+        print("  • 'server replied with a wrong session id'")
+        print("  • 'AuthKey errors'")
+        print("  • 'Unauthorized' errors")
+        print("\n⚠️  This will:")
+        print("  ✅ Keep all your settings (channels, keywords, etc.)")
+        print("  🧹 Clean up corrupted session files")
+        print("  🔄 Force re-authentication on next start")
+        print("  ❌ NOT delete your message mappings")
+        
+        while True:
+            confirm = input("\nDo you want to fix session issues? (yes/no): ").strip().lower()
+            if confirm in ['yes', 'y']:
+                try:
+                    # Clean up session files only
+                    self.cleanup_session_files()
+                    
+                    # Reset recovery attempts
+                    self.session_recovery_attempts = 0
+                    
+                    print("\n✅ Session issues have been fixed!")
+                    print("🔧 Session files cleaned up!")
+                    print("💡 You will need to re-authenticate when you start the forwarder")
+                    print("🔐 Your settings and message mappings are preserved!")
+                    input("\nPress Enter to continue...")
+                    break
+                except Exception as e:
+                    print(f"❌ Error fixing session issues: {e}")
+                    input("\nPress Enter to continue...")
+                    break
+            elif confirm in ['no', 'n']:
+                print("✅ Session fix cancelled.")
+                input("\nPress Enter to continue...")
+                break
+            else:
+                print("❌ Please enter 'yes' or 'no'!")
+                
     def modify_settings_menu(self):
         """Menu for modifying existing settings"""
         while True:
@@ -339,6 +491,7 @@ class NiftyForwarder:
         print("=" * 30)
         print("⚠️  This will delete all your saved settings!")
         print("You will need to reconfigure everything.")
+        print("💡 This also fixes session-related errors!")
         
         while True:
             confirm = input("\nAre you sure you want to reset all settings? (yes/no): ").strip().lower()
@@ -348,18 +501,20 @@ class NiftyForwarder:
                     self.settings_manager.settings = {}
                     self.settings_manager.save_settings()
                     
-                    # Remove session file
-                    session_files = [f"{self.session_file}.session", f"{self.session_file}.session-journal"]
-                    for file_path in session_files:
-                        if os.path.exists(file_path):
-                            os.remove(file_path)
+                    # Clean up session files
+                    self.cleanup_session_files()
                     
                     # Remove message mapping file
                     if os.path.exists(self.message_mapping_file):
                         os.remove(self.message_mapping_file)
                         self.logger.info(f"📁 Deleted message mapping file: {self.message_mapping_file}")
                     
+                    # Reset recovery attempts
+                    self.session_recovery_attempts = 0
+                    
                     print("✅ All settings have been reset!")
+                    print("🔧 Session files cleaned up!")
+                    print("💡 This should fix any session-related errors!")
                     input("\nPress Enter to continue...")
                     break
                 except Exception as e:
@@ -532,7 +687,25 @@ class NiftyForwarder:
     async def initialize_client(self):
         """Initialize Telegram client and handle authentication"""
         try:
-            self.client = TelegramClient(self.session_file, self.api_id, self.api_hash)
+            # Create client with additional parameters for stability
+            self.client = TelegramClient(
+                self.session_file, 
+                self.api_id, 
+                self.api_hash,
+                connection_retries=5,
+                retry_delay=1,
+                timeout=30,
+                request_retries=5
+            )
+            
+            # Connect with error handling
+            await self.client.connect()
+            
+            # Check if client is connected
+            if not self.client.is_connected():
+                raise Exception("Failed to connect to Telegram servers")
+                
+            # Start the client
             await self.client.start(phone=self.phone)
             
             # Check if user is authorized
@@ -545,10 +718,18 @@ class NiftyForwarder:
             # Load message mapping for handling edits/deletions
             self.load_message_mapping()
             
-            # Get user info
+            # Get user info to verify connection
             me = await self.client.get_me()
             self.logger.info(f"Logged in as: {me.first_name} {me.last_name or ''} (@{me.username or 'No username'})")
             
+            # Reset recovery attempts on successful initialization
+            self.session_recovery_attempts = 0
+            
+        except (AuthKeyError, AuthKeyDuplicatedError, AuthKeyInvalidError, 
+                AuthKeyPermEmptyError, AuthKeyUnregisteredError, SecurityError, 
+                UnauthorizedError, SessionRevokedError) as e:
+            # Re-raise session errors for recovery handling
+            raise
         except Exception as e:
             self.logger.error(f"Failed to initialize client: {e}")
             raise
@@ -891,8 +1072,8 @@ class NiftyForwarder:
         try:
             self.logger.info("🚀 Starting NiftyForwarder with Keyword Filtering...")
             
-            # Initialize client
-            await self.initialize_client()
+            # Initialize client with recovery
+            await self.initialize_client_with_recovery()
             
             # Setup event handlers
             if not await self.setup_event_handlers():
@@ -906,8 +1087,45 @@ class NiftyForwarder:
             self.logger.info("📞 Need help? Contact @ItsHarshX for support!")
             self.logger.info("⏹️  Press Ctrl+C to stop.")
             
-            # Keep the client running
-            await self.client.run_until_disconnected()
+            # Keep the client running with error handling
+            while True:
+                try:
+                    await self.client.run_until_disconnected()
+                    break  # Normal disconnection
+                except (AuthKeyError, AuthKeyDuplicatedError, AuthKeyInvalidError, 
+                        AuthKeyPermEmptyError, AuthKeyUnregisteredError, SecurityError, 
+                        UnauthorizedError, SessionRevokedError) as e:
+                    
+                    self.logger.error(f"🔐 Session error during runtime: {e}")
+                    
+                    if self.handle_session_error(e):
+                        self.logger.info("🔄 Attempting to recover session...")
+                        print("🔄 Session error detected, attempting recovery...")
+                        
+                        # Disconnect current client
+                        if self.client and self.client.is_connected():
+                            await self.client.disconnect()
+                        
+                        # Reinitialize with recovery
+                        await self.initialize_client_with_recovery()
+                        
+                        # Reestablish event handlers
+                        if not await self.setup_event_handlers():
+                            self.logger.error("❌ Failed to reestablish event handlers after recovery")
+                            break
+                        
+                        self.logger.info("✅ Session recovered successfully!")
+                        print("✅ Session recovered successfully!")
+                        continue
+                    else:
+                        self.logger.error("❌ Session recovery failed")
+                        print("❌ Session recovery failed")
+                        break
+                        
+                except Exception as e:
+                    self.logger.error(f"❌ Unexpected runtime error: {e}")
+                    print(f"❌ Unexpected runtime error: {e}")
+                    break
             
         except KeyboardInterrupt:
             self.logger.info("⏹️  Received interrupt signal. Stopping...")
@@ -915,12 +1133,24 @@ class NiftyForwarder:
         except Exception as e:
             self.logger.error(f"❌ Unexpected error: {e}")
             self.logger.error("📞 Contact @ItsHarshX for assistance!")
+            
+            # Check if it's a session error
+            if any(isinstance(e, err_type) for err_type in [AuthKeyError, AuthKeyDuplicatedError, 
+                   AuthKeyInvalidError, AuthKeyPermEmptyError, AuthKeyUnregisteredError, 
+                   SecurityError, UnauthorizedError, SessionRevokedError]):
+                print(f"\n🔐 SESSION ERROR: {type(e).__name__}")
+                print("💡 SOLUTION: Run the program again - it will automatically recover!")
+                print("🧹 If problems persist, use menu option 4 to reset all settings")
+            
             raise
             
         finally:
             if self.client:
-                await self.client.disconnect()
-                self.logger.info("🔌 Client disconnected.")
+                try:
+                    await self.client.disconnect()
+                    self.logger.info("🔌 Client disconnected.")
+                except:
+                    pass
                 
             # Save message mapping one final time before exit
             self.save_message_mapping()
