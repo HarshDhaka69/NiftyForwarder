@@ -713,32 +713,62 @@ class NiftyForwarder:
                 await self.client.disconnect()
                 self.logger.info("🔌 Client disconnected.")
                 
-    def start(self):
-        """Start the forwarder"""
-        try:
-            # Print banner
-            print_banner()
-            
-            # Show main menu and get user choice
-            should_start = self.interactive_setup()
-            
-            if not should_start:
-                print("👋 Exiting NiftyForwarder...")
-                return
-            
-            # Save settings before starting
-            if not self.save_current_settings():
-                print("⚠️  Warning: Could not save settings!")
-            
-            print("\n🚀 Starting NiftyForwarder...")
-            print("⏳ Please wait while we initialize...")
-            
-            # Run the async main function
-            asyncio.run(self.run())
-            
-        except KeyboardInterrupt:
-            self.logger.info("⏹️  NiftyForwarder stopped by user.")
-            
-        except Exception as e:
-            self.logger.error(f"❌ Failed to start NiftyForwarder: {e}")
-            self.logger.error
+   def start(self):
+    """Start the forwarder"""
+    try:
+        # Print banner
+        print_banner()
+        
+        # Show main menu and get user choice
+        should_start = self.interactive_setup()
+        
+        if not should_start:
+            print("👋 Exiting NiftyForwarder...")
+            return
+        
+        # Save settings before starting
+        if not self.save_current_settings():
+            print("⚠️  Warning: Could not save settings!")
+        
+        print("\n🚀 Starting NiftyForwarder...")
+        print("⏳ Please wait while we initialize...")
+        
+        # Run the async main function
+        asyncio.run(self.run())
+        
+    except KeyboardInterrupt:
+        self.logger.info("⏹️  NiftyForwarder stopped by user.")
+        
+    except Exception as e:
+        self.logger.error(f"❌ Failed to start NiftyForwarder: {e}")
+        self.logger.error("📞 Contact @ItsHarshX for assistance!")
+        print(f"❌ Fatal error: {e}")
+        print("📞 Contact @ItsHarshX for support!")
+        
+    finally:
+        print("\n🔌 NiftyForwarder session ended.")
+        print("📞 For support and updates, contact @ItsHarshX")
+
+
+# Main execution
+if __name__ == "__main__":
+    # Setup logging
+    logger = setup_logging()
+    
+    try:
+        # Create and start the forwarder
+        forwarder = NiftyForwarder()
+        forwarder.start()
+        
+    except KeyboardInterrupt:
+        logger.info("⏹️  Program interrupted by user.")
+        
+    except Exception as e:
+        logger.error(f"❌ Critical error: {e}")
+        print(f"❌ Critical error: {e}")
+        print("📞 Contact @ItsHarshX for support!")
+        
+    finally:
+        logger.info("🔌 Program ended.")
+        print("\n👋 Thank you for using NiftyForwarder!")
+        print("📞 For support and updates, contact @ItsHarshX")
