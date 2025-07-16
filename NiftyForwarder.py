@@ -14,6 +14,7 @@ import sys
 import time
 import re
 import json
+import codecs
 from datetime import datetime
 from telethon import TelegramClient, events
 from telethon.errors import (
@@ -40,7 +41,8 @@ DEFAULT_CONFIG = {
     'FORWARD_DELAY': 2,
     'IGNORE_MEDIA': False,
     'IGNORE_FORWARDS': False,
-    'IGNORE_BOTS': False
+    'IGNORE_BOTS': False,
+    'SAFE_UNICODE_MODE': True  # Enable safe Unicode handling for Windows compatibility
 }
 
 def print_banner():
@@ -66,6 +68,93 @@ def print_banner():
 """
     print(banner)
 
+def safe_log_message(message):
+    """
+    Safely handle Unicode characters in log messages for Windows compatibility
+    """
+    try:
+        # Try to encode the message to detect Unicode issues
+        message.encode('cp1252')
+        return message
+    except UnicodeEncodeError:
+        # Replace common emojis with text equivalents
+        emoji_replacements = {
+            '✅': '[OK]',
+            '❌': '[ERROR]',
+            '⏭️': '[SKIP]',
+            '📨': '[MSG]',
+            '📝': '[TEXT]',
+            '🎯': '[TARGET]',
+            '🎉': '[SUCCESS]',
+            '🔍': '[SEARCH]',
+            '📁': '[FILE]',
+            '💾': '[SAVE]',
+            '📞': '[CONTACT]',
+            '⏹️': '[STOP]',
+            '🚀': '[START]',
+            '🔐': '[SECURITY]',
+            '🔄': '[RETRY]',
+            '⏳': '[WAIT]',
+            '🧹': '[CLEAN]',
+            '🔧': '[FIX]',
+            '💡': '[INFO]',
+            '📋': '[LIST]',
+            '🗑️': '[DELETE]',
+            '✏️': '[EDIT]',
+            '🔌': '[DISCONNECT]',
+            '📊': '[STATS]',
+            '🎁': '[GIFT]',
+            '🔥': '[FIRE]',
+            '🤑': '[MONEY]',
+            '🇮🇳': '[IN]',
+            '🐣': '[CHICK]',
+            '🐻': '[BEAR]',
+            '🎀': '[BOW]',
+            '⋆': '[STAR]',
+        }
+        
+        # Replace emojis with text equivalents
+        safe_message = message
+        for emoji, replacement in emoji_replacements.items():
+            safe_message = safe_message.replace(emoji, replacement)
+        
+        # Remove any remaining Unicode characters that might cause issues
+        safe_message = safe_message.encode('ascii', errors='ignore').decode('ascii')
+        
+        return safe_message
+
+class SafeLoggingHandler(logging.StreamHandler):
+    """Custom logging handler that safely handles Unicode characters"""
+    
+    def emit(self, record):
+        try:
+            # Only apply safe message conversion if SAFE_UNICODE_MODE is enabled
+            if DEFAULT_CONFIG.get('SAFE_UNICODE_MODE', True):
+                # Apply safe message conversion to the log record
+                if hasattr(record, 'msg') and record.msg:
+                    record.msg = safe_log_message(str(record.msg))
+                
+                # Apply safe message conversion to formatted message
+                if hasattr(record, 'getMessage'):
+                    original_getMessage = record.getMessage
+                    def safe_getMessage():
+                        try:
+                            return safe_log_message(original_getMessage())
+                        except:
+                            return safe_log_message(str(record.msg))
+                    record.getMessage = safe_getMessage
+            
+            super().emit(record)
+        except Exception as e:
+            # Fallback: just print the error without emojis
+            try:
+                if DEFAULT_CONFIG.get('SAFE_UNICODE_MODE', True):
+                    print(f"[LOG ERROR] {safe_log_message(str(record.msg))}")
+                else:
+                    print(f"[LOG ERROR] {str(record.msg)}")
+            except:
+                print(f"[LOG ERROR] Unable to log message")
+
 def setup_logging():
     """Setup logging configuration"""
     # Create logs directory if it doesn't exist
@@ -76,16 +165,41 @@ def setup_logging():
     log_level = getattr(logging, DEFAULT_CONFIG['LOG_LEVEL'].upper(), logging.INFO)
     log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     
-    handlers = [logging.StreamHandler(sys.stdout)]
+    # Create handlers with UTF-8 encoding
+    handlers = []
     
+    # Console handler with safe Unicode handling
+    console_handler = SafeLoggingHandler(sys.stdout)
+    console_handler.setLevel(log_level)
+    console_handler.setFormatter(logging.Formatter(log_format))
+    handlers.append(console_handler)
+    
+    # File handler with UTF-8 encoding
     if DEFAULT_CONFIG['LOG_TO_FILE']:
-        handlers.append(logging.FileHandler(f'logs/{DEFAULT_CONFIG["LOG_FILE_NAME"]}'))
+        file_handler = logging.FileHandler(
+            f'logs/{DEFAULT_CONFIG["LOG_FILE_NAME"]}', 
+            encoding='utf-8'
+        )
+        file_handler.setLevel(log_level)
+        file_handler.setFormatter(logging.Formatter(log_format))
+        handlers.append(file_handler)
     
+    # Configure root logger
     logging.basicConfig(
         level=log_level,
         format=log_format,
-        handlers=handlers
+        handlers=handlers,
+        force=True  # Force reconfiguration
     )
+    
+    # Set console encoding for Windows
+    if sys.platform.startswith('win'):
+        try:
+            import codecs
+            sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer)
+            sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer)
+        except:
+            pass
     
     return logging.getLogger(__name__)
 
@@ -1164,6 +1278,12 @@ class NiftyForwarder:
         try:
             # Print banner
             print_banner()
+            
+            # Show Unicode compatibility message
+            if sys.platform.startswith('win'):
+                print("🔧 Windows Unicode compatibility mode enabled")
+                print("📝 Emojis will be converted to text for better compatibility")
+                print()
             
             # Show main menu and get user choice
             should_start = self.interactive_setup()
