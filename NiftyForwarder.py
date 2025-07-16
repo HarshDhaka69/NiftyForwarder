@@ -157,11 +157,14 @@ class NiftyForwarder:
                     return True  # Start the forwarder
                 elif choice == '2':
                     self.modify_settings_menu()
+                    continue  # Stay in main menu after modifying settings
                 elif choice == '3':
                     self.display_current_settings()
                     input("\nPress Enter to continue...")
+                    continue  # Stay in main menu
                 elif choice == '4':
                     self.reset_all_settings()
+                    continue  # Stay in main menu
                 elif choice == '5':
                     print("👋 Goodbye!")
                     return False  # Exit
@@ -177,6 +180,7 @@ class NiftyForwarder:
                 
                 if choice == '1':
                     self.setup_all_settings()
+                    continue  # Return to main menu after setup
                 elif choice == '2':
                     print("👋 Goodbye!")
                     return False  # Exit
@@ -223,22 +227,27 @@ class NiftyForwarder:
                 self.setup_api_credentials()
                 self.save_current_settings()
                 print("✅ Account settings updated!")
+                input("\nPress Enter to continue...")
             elif choice == '2':
                 self.setup_source_channels()
                 self.save_current_settings()
                 print("✅ Source channels updated!")
+                input("\nPress Enter to continue...")
             elif choice == '3':
                 self.setup_target_channels()
                 self.save_current_settings()
                 print("✅ Target channels updated!")
+                input("\nPress Enter to continue...")
             elif choice == '4':
                 self.setup_keywords()
                 self.save_current_settings()
                 print("✅ Keywords updated!")
+                input("\nPress Enter to continue...")
             elif choice == '5':
                 self.setup_all_settings()
+                input("\nPress Enter to continue...")
             elif choice == '6':
-                break
+                break  # Return to main menu
             else:
                 print("❌ Invalid choice! Please enter 1-6.")
                 
@@ -264,13 +273,15 @@ class NiftyForwarder:
                             os.remove(file_path)
                     
                     print("✅ All settings have been reset!")
-                    print("🔄 Please restart the application to reconfigure.")
+                    input("\nPress Enter to continue...")
                     break
                 except Exception as e:
                     print(f"❌ Error resetting settings: {e}")
+                    input("\nPress Enter to continue...")
                     break
             elif confirm in ['no', 'n']:
                 print("✅ Settings reset cancelled.")
+                input("\nPress Enter to continue...")
                 break
             else:
                 print("❌ Please enter 'yes' or 'no'!")
@@ -610,36 +621,34 @@ class NiftyForwarder:
                     # Apply rate limiting
                     await asyncio.sleep(DEFAULT_CONFIG['FORWARD_DELAY'])
                     
-                    # Forward the message
-                    await self.client.forward_messages(
+                    # Send message as new message (copy) instead of forward to avoid forward tags
+                    await self.client.send_message(
                         entity=target_entity,
-                        messages=event.message,
-                        from_peer=event.chat_id
+                        message=event.message
                     )
                     
                     target_name = getattr(target_entity, 'title', '') or getattr(target_entity, 'first_name', 'Unknown')
-                    self.logger.info(f"✅ Message forwarded to {target_name}")
+                    self.logger.info(f"✅ Message sent to {target_name}")
                     forwarded_count += 1
                     
                 except FloodWaitError as e:
                     self.logger.warning(f"⏳ Rate limited for {e.seconds} seconds")
                     await asyncio.sleep(e.seconds)
                     
-                    # Retry forwarding after wait
+                    # Retry sending after wait
                     try:
-                        await self.client.forward_messages(
+                        await self.client.send_message(
                             entity=target_entity,
-                            messages=event.message,
-                            from_peer=event.chat_id
+                            message=event.message
                         )
                         forwarded_count += 1
                     except Exception as retry_error:
                         self.logger.error(f"❌ Retry failed for {target_entity}: {retry_error}")
                     
                 except Exception as e:
-                    self.logger.error(f"❌ Failed to forward message to {target_entity}: {e}")
+                    self.logger.error(f"❌ Failed to send message to {target_entity}: {e}")
                     
-            self.logger.info(f"📊 Message forwarded to {forwarded_count}/{len(target_entities)} channels")
+            self.logger.info(f"📊 Message sent to {forwarded_count}/{len(target_entities)} channels")
                     
         except Exception as e:
             self.logger.error(f"❌ Error in forward_message: {e}")
@@ -732,44 +741,4 @@ class NiftyForwarder:
             
         except Exception as e:
             self.logger.error(f"❌ Failed to start NiftyForwarder: {e}")
-            self.logger.error("📞 Contact @ItsHarshX for troubleshooting!")
-            raise
-
-def main():
-    """Main function with retry logic"""
-    # Setup logging first
-    logger = setup_logging()
-    
-    # Retry logic for robustness
-    max_retries = 3
-    retry_delay = 30
-    
-    for attempt in range(max_retries):
-        try:
-            logger.info(f"🚀 Starting NiftyForwarder (Attempt {attempt + 1}/{max_retries})")
-            
-            # Create and start the forwarder
-            forwarder = NiftyForwarder()
-            forwarder.start()
-            
-            # If we reach here, the forwarder ran successfully
-            logger.info("✅ NiftyForwarder completed successfully!")
-            break
-            
-        except KeyboardInterrupt:
-            logger.info("⏹️  NiftyForwarder stopped by user.")
-            break
-            
-        except Exception as e:
-            logger.error(f"❌ NiftyForwarder failed on attempt {attempt + 1}: {e}")
-            
-            if attempt < max_retries - 1:
-                logger.info(f"⏳ Retrying in {retry_delay} seconds...")
-                time.sleep(retry_delay)
-            else:
-                logger.error("❌ All retry attempts failed!")
-                logger.error("📞 Contact @ItsHarshX for assistance!")
-                raise
-                
-if __name__ == "__main__":
-    main()
+            self.logger.error
