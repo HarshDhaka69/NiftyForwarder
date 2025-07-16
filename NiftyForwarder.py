@@ -242,7 +242,7 @@ class NiftyForwarder:
                 raise
                 
         raise Exception("Failed to initialize client after maximum recovery attempts")
-
+        
     def load_message_mapping(self):
         """Load message mapping from file"""
         try:
@@ -376,7 +376,7 @@ class NiftyForwarder:
     def interactive_setup(self):
         """Interactive setup - now just calls main menu"""
         return self.main_menu()
-             
+            
     def display_current_settings(self):
         """Display current settings"""
         print("\n📋 CURRENT SETTINGS:")
@@ -442,7 +442,7 @@ class NiftyForwarder:
                 break
             else:
                 print("❌ Please enter 'yes' or 'no'!")
-                
+        
     def modify_settings_menu(self):
         """Menu for modifying existing settings"""
         while True:
@@ -878,6 +878,11 @@ class NiftyForwarder:
             if not self.should_forward_message(event):
                 return
                 
+            # Check if we already forwarded this message (prevent duplicates)
+            if event.message.id in self.message_mapping:
+                self.logger.debug(f"⏭️ Message already forwarded, skipping duplicate: {event.message.id}")
+                return
+                
             # Get sender info safely
             try:
                 sender = await event.get_sender()
@@ -896,7 +901,7 @@ class NiftyForwarder:
             
             # Forward to all target channels
             forwarded_count = 0
-            forwarded_message_ids = []  # ADD THIS LINE
+            forwarded_message_ids = []
             
             for target_entity in target_entities:
                 try:
@@ -904,12 +909,11 @@ class NiftyForwarder:
                     await asyncio.sleep(DEFAULT_CONFIG['FORWARD_DELAY'])
                     
                     # Send message as new message (copy) instead of forward to avoid forward tags
-                    sent_message = await self.client.send_message(  # CHANGE: store the returned message
+                    sent_message = await self.client.send_message(
                         entity=target_entity,
                         message=event.message
                     )
                     
-                    # ADD THIS LINE:
                     forwarded_message_ids.append(sent_message.id)
                     
                     target_name = getattr(target_entity, 'title', '') or getattr(target_entity, 'first_name', 'Unknown')
@@ -934,7 +938,6 @@ class NiftyForwarder:
                 except Exception as e:
                     self.logger.error(f"❌ Failed to send message to {target_entity}: {e}")
                     
-            # ADD THIS AFTER THE LOOP:
             # Store message mapping for future edits/deletions
             if forwarded_message_ids:
                 self.message_mapping[event.message.id] = forwarded_message_ids
@@ -1175,12 +1178,16 @@ class NiftyForwarder:
             
             print("\n🚀 Starting NiftyForwarder...")
             print("⏳ Please wait while we initialize...")
+            print("💡 The forwarder will run in the background.")
+            print("📋 Check the logs for real-time activity.")
+            print("⏹️  Press Ctrl+C to stop the forwarder.")
             
             # Run the async main function
             asyncio.run(self.run())
             
         except KeyboardInterrupt:
             self.logger.info("⏹️  NiftyForwarder stopped by user.")
+            print("\n⏹️  NiftyForwarder stopped by user.")
             
         except Exception as e:
             self.logger.error(f"❌ Failed to start NiftyForwarder: {e}")
