@@ -946,29 +946,6 @@ class TelegramForwarder:
             logger.error(f"Error sending message without forward tag: {e}")
             return None
     
-    async def forward_message(self, source_message, target_channel_id):
-        """Forward message to target channel - always try to avoid forward tags"""
-        try:
-            # Always try to send without forward tag first
-            sent_message = await self.send_message_without_forward_tag(source_message, target_channel_id)
-            
-            if sent_message:
-                logger.info(f"Message sent without forward tag to channel {target_channel_id}")
-                return sent_message
-            else:
-                # If that fails, try regular forwarding as last resort
-                logger.warning(f"Falling back to regular forwarding for channel {target_channel_id}")
-                target_entity = await self.client.get_entity(target_channel_id)
-                sent_message = await self.client.forward_messages(
-                    target_entity,
-                    source_message
-                )
-                return sent_message
-                
-        except Exception as e:
-            logger.error(f"Error forwarding message: {e}")
-            return None
-    
     async def handle_new_message(self, event):
         """Handle new messages from source channels"""
         try:
@@ -1047,7 +1024,7 @@ class TelegramForwarder:
             forwarded_messages = []
             for target_channel in self.target_channels:
                 try:
-                    forwarded_msg = await self.forward_message(message, target_channel['id'])
+                    forwarded_msg = await self.send_message_without_forward_tag(message, target_channel['id'])
                     if forwarded_msg:
                         forwarded_messages.append({
                             'channel_id': target_channel['id'],
