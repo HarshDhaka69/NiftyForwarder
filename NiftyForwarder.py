@@ -386,7 +386,13 @@ class TelegramForwarder:
         try:
             # Check cache first
             if emoji_text in self.custom_emoji_cache:
-                return self.custom_emoji_cache[emoji_text]
+                cached_id = self.custom_emoji_cache[emoji_text]
+                # Validate cached ID is within bounds
+                if not (-9223372036854775808 <= cached_id <= 9223372036854775807):
+                    logger.warning(f"Cached document ID {cached_id} for emoji '{emoji_text}' is out of bounds, removing from cache")
+                    del self.custom_emoji_cache[emoji_text]
+                else:
+                    return cached_id
             
             # Try to find custom emoji from user's available stickers/emojis
             try:
@@ -416,9 +422,13 @@ class TelegramForwarder:
                                 for attr in document.attributes:
                                     if hasattr(attr, 'alt') and attr.alt == emoji_text:
                                         # Found a matching custom emoji!
-                                        self.custom_emoji_cache[emoji_text] = document.id
-                                        logger.info(f"Found real document_id {document.id} for emoji '{emoji_text}'")
-                                        return document.id
+                                        # Validate document ID is within bounds
+                                        if -9223372036854775808 <= document.id <= 9223372036854775807:
+                                            self.custom_emoji_cache[emoji_text] = document.id
+                                            logger.info(f"Found real document_id {document.id} for emoji '{emoji_text}'")
+                                            return document.id
+                                        else:
+                                            logger.warning(f"Found document ID {document.id} for emoji '{emoji_text}' but it's out of bounds")
                     except Exception as e:
                         # Skip problematic sticker sets
                         continue
@@ -427,14 +437,14 @@ class TelegramForwarder:
                 logger.warning(f"Could not access sticker API: {e}")
             
             # If no real custom emoji found, generate a placeholder document ID
-            # This is for demonstration - in practice, you'd need access to premium emoji sets
-            emoji_hash = hashlib.md5(emoji_text.encode()).hexdigest()
-            # Use a more realistic document ID format (64-bit integer)
-            document_id = int(emoji_hash[:16], 16)
+            # Use a more conservative approach for generating placeholder IDs
+            import random
+            # Generate a random ID within safe bounds (using smaller range to be safe)
+            document_id = random.randint(-9223372036854775808 // 2, 9223372036854775807 // 2)
             
             # Cache the result
             self.custom_emoji_cache[emoji_text] = document_id
-            logger.info(f"Generated placeholder document_id {document_id} for emoji '{emoji_text}'")
+            logger.info(f"Generated safe placeholder document_id {document_id} for emoji '{emoji_text}'")
             
             return document_id
             
@@ -824,35 +834,57 @@ class TelegramForwarder:
                 ] if entities else []
                 
                 if not existing_custom_emojis:
-                    # Enhance message with auto-generated custom emoji entities
-                    enhanced_text, enhanced_entities = await self.enhance_message_with_custom_emojis(message_text)
-                    if enhanced_entities:
-                        message_text = enhanced_text
-                        entities = enhanced_entities
-                        logger.info(f"Enhanced message with {len(enhanced_entities)} auto-generated custom emoji entities")
-                        print(f"✨ Enhanced message with {len(enhanced_entities)} auto-generated premium emojis")
-            
-            # Log if premium emojis were processed
-            if self.is_premium and entities:
-                custom_emojis = [e for e in entities if isinstance(e, MessageEntityCustomEmoji)]
-                if custom_emojis:
-                    logger.info(f"Processing {len(custom_emojis)} premium emojis for forwarding")
-                    print(f"🎉 Processing {len(custom_emojis)} premium emojis with original/enhanced entities")
+                    try:
+                        # Enhance message with auto-generated custom emoji entities
+                        enhanced_text, enhanced_entities = await self.enhance_message_with_custom_emojis(message_text)
+                        if enhanced_entities:
+                            # Validate all custom emoji document IDs
+                            valid_entities = []
+                            for entity in enhanced_entities:
+                                if isinstance(entity, MessageEntityCustomEmoji):
+                                    try:
+                                        # Check if document ID is within valid range
+                                        if -9223372036854775808 <= entity.document_id <= 9223372036854775807:
+                                            valid_entities.append(entity)
+                                        else:
+                                            logger.warning(f"Skipping custom emoji entity with invalid document ID: {entity.document_id}")
+                                    except Exception as e:
+                                        logger.warning(f"Error validating custom emoji entity: {e}")
+                                else:
+                                    valid_entities.append(entity)
+                            
+                            if valid_entities:
+                                message_text = enhanced_text
+                                entities = valid_entities
+                                logger.info(f"Enhanced message with {len(valid_entities)} valid auto-generated custom emoji entities")
+                    except Exception as e:
+                        logger.error(f"Error enhancing message with custom emojis: {e}")
+                        # Fall back to original text and entities
+                        message_text = source_message.text
+                        entities = source_message.entities
             
             # Determine parse mode based on custom emoji presence
-            custom_emoji_entities = [
-                entity for entity in entities 
-                if hasattr(entity, 'document_id') and isinstance(entity, MessageEntityCustomEmoji)
-            ] if entities else []
+            custom_emoji_entities = []
+            if entities:
+                try:
+                    custom_emoji_entities = [
+                        entity for entity in entities 
+                        if isinstance(entity, MessageEntityCustomEmoji) 
+                        and hasattr(entity, 'document_id')
+                        and -9223372036854775808 <= entity.document_id <= 9223372036854775807
+                    ]
+                except Exception as e:
+                    logger.error(f"Error filtering custom emoji entities: {e}")
+                    entities = [e for e in entities if not isinstance(e, MessageEntityCustomEmoji)]
             
-            # If custom emojis are present, use entities instead of parse_mode
+            # If custom emojis are present and valid, use entities instead of parse_mode
             if custom_emoji_entities:
                 parse_mode = None  # Don't use markdown parsing for custom emojis
-                formatting_entities = entities  # Use original/enhanced entities (hardcoded: always preserve)
-                logger.info(f"Using entity-based formatting for {len(custom_emoji_entities)} custom emojis")
+                formatting_entities = entities  # Use original/enhanced entities
+                logger.info(f"Using entity-based formatting for {len(custom_emoji_entities)} valid custom emojis")
             else:
-                parse_mode = self.get_parse_mode()  # Hardcoded to return 'markdown'
-                formatting_entities = entities  # Hardcoded: always preserve formatting
+                parse_mode = self.get_parse_mode()  # Use markdown
+                formatting_entities = [e for e in entities if not isinstance(e, MessageEntityCustomEmoji)] if entities else None
             
             # Method 1: Try to use send_file for media or send_message for text
             if source_message.media:
@@ -924,27 +956,46 @@ class TelegramForwarder:
                             
                 except Exception as media_error:
                     logger.error(f"Media sending failed: {media_error}")
-                    # Fall back to text only
+                    # Fall back to text only without custom emojis
+                    sent_message = await self.client.send_message(
+                        target_entity,
+                        message_text,
+                        parse_mode='markdown',  # Always use markdown for fallback
+                        formatting_entities=[e for e in entities if not isinstance(e, MessageEntityCustomEmoji)] if entities else None
+                    )
+            else:
+                # Text only message
+                try:
                     sent_message = await self.client.send_message(
                         target_entity,
                         message_text,
                         parse_mode=parse_mode,
                         formatting_entities=formatting_entities
                     )
-            else:
-                # Text only message
-                sent_message = await self.client.send_message(
-                    target_entity,
-                    message_text,
-                    parse_mode=parse_mode,
-                    formatting_entities=formatting_entities
-                )
+                except Exception as text_error:
+                    logger.error(f"Error sending text message: {text_error}")
+                    # Fall back to sending without custom emojis
+                    sent_message = await self.client.send_message(
+                        target_entity,
+                        message_text,
+                        parse_mode='markdown',  # Always use markdown for fallback
+                        formatting_entities=[e for e in entities if not isinstance(e, MessageEntityCustomEmoji)] if entities else None
+                    )
             
             return sent_message
             
         except Exception as e:
             logger.error(f"Error sending message without forward tag: {e}")
-            return None
+            # Final fallback: try to send just the text with minimal formatting
+            try:
+                return await self.client.send_message(
+                    target_entity,
+                    message_text if message_text else "Failed to forward message",
+                    parse_mode='markdown'
+                )
+            except:
+                logger.error("Failed to send even the fallback message")
+                return None
     
     async def handle_new_message(self, event):
         """Handle new messages from source channels"""
@@ -1054,6 +1105,21 @@ class TelegramForwarder:
         try:
             message = event.message
             
+            # First verify if this is actually an edit
+            if not hasattr(message, 'edit_date') or not message.edit_date:
+                logger.debug("Received edit event but message has no edit_date, skipping")
+                return
+            
+            # Get the original message to compare
+            try:
+                original_msg = await self.client.get_messages(message.peer_id, ids=message.id)
+                if original_msg and original_msg.text == message.text:
+                    logger.debug("Message content unchanged, skipping edit")
+                    return
+            except Exception as e:
+                logger.warning(f"Could not verify original message content: {e}")
+                # Continue processing if we can't verify, better to process than miss an edit
+            
             # Get channel/chat ID - handle different peer types
             channel_id = None
             if hasattr(message.peer_id, 'channel_id'):
@@ -1076,8 +1142,8 @@ class TelegramForwarder:
             if not self.contains_keyword(message.text):
                 return
             
-            logger.info(f"Editing forwarded message from channel {channel_id}")
-            print(f"{colors.BRIGHT_YELLOW}✏️ Editing forwarded message with formatting...{colors.RESET}")
+            logger.info(f"Processing confirmed edit for message {message.id} from channel {channel_id}")
+            print(f"{colors.BRIGHT_YELLOW}✏️ Processing confirmed message edit...{colors.RESET}")
             
             # Process message formatting
             edited_text, entities = self.process_custom_emojis(message)
@@ -1091,43 +1157,89 @@ class TelegramForwarder:
                 ] if entities else []
                 
                 if not existing_custom_emojis:
-                    # Enhance message with auto-generated custom emoji entities
-                    enhanced_text, enhanced_entities = await self.enhance_message_with_custom_emojis(edited_text)
-                    if enhanced_entities:
-                        edited_text = enhanced_text
-                        entities = enhanced_entities
-                        logger.info(f"Enhanced edited message with {len(enhanced_entities)} auto-generated custom emoji entities")
-            
-            # Determine parse mode based on custom emoji presence
-            custom_emoji_entities = [
-                entity for entity in entities 
-                if hasattr(entity, 'document_id') and isinstance(entity, MessageEntityCustomEmoji)
-            ] if entities else []
-            
-            # If custom emojis are present, use entities instead of parse_mode
-            if custom_emoji_entities:
-                parse_mode = None  # Don't use markdown parsing for custom emojis
-                formatting_entities = entities  # Use original/enhanced entities (hardcoded: always preserve)
-                logger.info(f"Using entity-based formatting for editing {len(custom_emoji_entities)} custom emojis")
-            else:
-                parse_mode = self.get_parse_mode()  # Hardcoded to return 'markdown'
-                formatting_entities = entities  # Hardcoded: always preserve formatting
-            
+                    try:
+                        # Enhance message with auto-generated custom emoji entities
+                        enhanced_text, enhanced_entities = await self.enhance_message_with_custom_emojis(edited_text)
+                        if enhanced_entities:
+                            # Validate all custom emoji document IDs
+                            valid_entities = []
+                            for entity in enhanced_entities:
+                                if isinstance(entity, MessageEntityCustomEmoji):
+                                    try:
+                                        # Check if document ID is within valid range
+                                        if -9223372036854775808 <= entity.document_id <= 9223372036854775807:
+                                            valid_entities.append(entity)
+                                    except Exception as e:
+                                        logger.warning(f"Error validating custom emoji entity: {e}")
+                                else:
+                                    valid_entities.append(entity)
+                            
+                            if valid_entities:
+                                edited_text = enhanced_text
+                                entities = valid_entities
+                                logger.info(f"Enhanced edited message with {len(valid_entities)} valid auto-generated custom emoji entities")
+                    except Exception as e:
+                        logger.error(f"Error enhancing edited message with custom emojis: {e}")
+                        # Fall back to original text and entities
+                        edited_text = message.text
+                        entities = message.entities
+        
             # Edit all forwarded messages
             forwarded_messages = self.message_map[message_key]
             for forwarded_msg in forwarded_messages:
                 try:
                     target_entity = await self.client.get_entity(forwarded_msg['channel_id'])
                     
-                    await self.client.edit_message(
-                        target_entity,
-                        forwarded_msg['message_id'],
-                        edited_text,
-                        parse_mode=parse_mode,
-                        formatting_entities=formatting_entities
-                    )
-                    print(f"{colors.BRIGHT_GREEN}✅ Message edited in target channel with formatting{colors.RESET}")
+                    # First try: Edit with full formatting
+                    try:
+                        await self.client.edit_message(
+                            target_entity,
+                            forwarded_msg['message_id'],
+                            edited_text,
+                            formatting_entities=entities
+                        )
+                        print(f"{colors.BRIGHT_GREEN}✅ Message edited with full formatting{colors.RESET}")
+                        continue  # Success, move to next message
+                    except Exception as full_format_error:
+                        logger.warning(f"Could not edit with full formatting: {full_format_error}")
                     
+                    # Second try: Edit without custom emojis but with other formatting
+                    try:
+                        filtered_entities = [e for e in entities if not isinstance(e, MessageEntityCustomEmoji)] if entities else None
+                        await self.client.edit_message(
+                            target_entity,
+                            forwarded_msg['message_id'],
+                            edited_text,
+                            parse_mode='markdown',
+                            formatting_entities=filtered_entities
+                        )
+                        print(f"{colors.BRIGHT_YELLOW}⚠️ Message edited without custom emojis{colors.RESET}")
+                        continue  # Success, move to next message
+                    except Exception as partial_format_error:
+                        logger.warning(f"Could not edit with partial formatting: {partial_format_error}")
+                    
+                    # Final try: Edit with just text and markdown
+                    try:
+                        await self.client.edit_message(
+                            target_entity,
+                            forwarded_msg['message_id'],
+                            edited_text,
+                            parse_mode='markdown'
+                        )
+                        print(f"{colors.BRIGHT_YELLOW}⚠️ Message edited with basic formatting only{colors.RESET}")
+                    except Exception as basic_format_error:
+                        # If all attempts fail, try one last time with just plain text
+                        try:
+                            await self.client.edit_message(
+                                target_entity,
+                                forwarded_msg['message_id'],
+                                edited_text
+                            )
+                            print(f"{colors.BRIGHT_RED}⚠️ Message edited without formatting{colors.RESET}")
+                        except Exception as plain_text_error:
+                            logger.error(f"Failed to edit message even without formatting: {plain_text_error}")
+                            print(f"{colors.BRIGHT_RED}❌ Failed to edit message{colors.RESET}")
+                
                 except Exception as edit_error:
                     if "Content of the message was not modified" in str(edit_error):
                         logger.info(f"Message content unchanged, skipping edit")
